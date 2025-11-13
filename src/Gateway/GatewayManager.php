@@ -33,5 +33,36 @@ class GatewayManager
             ProviderEnum::WhatsAppCloud => $this->meta,
         };
     }
-}
 
+    public function groups(ProviderEnum $provider): object
+    {
+        return match ($provider) {
+            ProviderEnum::ZApi => $this->zapi,
+            ProviderEnum::Uazapi => $this->uazapi,
+            ProviderEnum::WhatsAppCloud => $this->meta,
+        };
+    }
+
+    public function contacts(ProviderEnum $provider): object
+    {
+        return match ($provider) {
+            ProviderEnum::ZApi => $this->zapi,
+            ProviderEnum::Uazapi => $this->uazapi,
+            ProviderEnum::WhatsAppCloud => $this->meta,
+        };
+    }
+
+    public function templates(): MetaClient
+    {
+        return $this->meta;
+    }
+
+    public function queue(ProviderEnum $provider): object
+    {
+        return match ($provider) {
+            ProviderEnum::ZApi => $this->zapi,
+            ProviderEnum::Uazapi => $this->uazapi,
+            ProviderEnum::WhatsAppCloud => $this->meta,
+        };
+    }
+}

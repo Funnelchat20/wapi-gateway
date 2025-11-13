@@ -4,9 +4,12 @@ namespace Funnelchat\WapiGateway\Clients;
 
 use Funnelchat\WapiGateway\Contracts\MessagesContract;
 use Funnelchat\WapiGateway\Contracts\InstancesContract;
+use Funnelchat\WapiGateway\Contracts\GroupsContract;
+use Funnelchat\WapiGateway\Contracts\ContactsContract;
+use Funnelchat\WapiGateway\Contracts\QueueContract;
 use Illuminate\Support\Facades\Http;
 
-class UazapiClient implements MessagesContract, InstancesContract
+class UazapiClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract
 {
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
     {
@@ -36,10 +39,518 @@ class UazapiClient implements MessagesContract, InstancesContract
         ];
     }
 
+    public function status(string $uid, string $token): array
+    {
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.status');
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->get($url);
+        if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
+        return $res->json();
+    }
+
+    public function qrCode(string $uid, string $token): array
+    {
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.qr_code');
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->post($url);
+        if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
+        $data = $res->json();
+        return ['qrcode' => $data['instance']['qrcode'] ?? $data['qrcode'] ?? null, 'paircode' => $data['instance']['paircode'] ?? $data['paircode'] ?? null];
+    }
+
+    public function logout(string $uid, string $token): array
+    {
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.disconnect');
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->post($url);
+        if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
+        return $res->json();
+    }
+
+    public function reboot(string $uid, string $token): array
+    {
+        $disc = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->post(config('uazapi.base_url') . config('uazapi.endpoints.disconnect'));
+        if ($disc->failed()) return ['error' => $this->formatError($disc->json('message') ?? $disc->json('error') ?? 'error')];
+        $conn = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->post(config('uazapi.base_url') . config('uazapi.endpoints.connect'));
+        if ($conn->failed()) return ['error' => $this->formatError($conn->json('message') ?? $conn->json('error') ?? 'error')];
+        return ['status' => 'restarted'];
+    }
+
+    public function me(string $uid, string $token): array
+    {
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->get(config('uazapi.base_url') . config('uazapi.endpoints.status'));
+        if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
+        return $res->json();
+    }
+
+    public function checkPhone(string $uid, string $token, string $phone): array
+    {
+        $url = config('uazapi.base_url') . '/contact/checkPhone/' . $phone;
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->get($url);
+        if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
+        return $res->json();
+    }
+
+    public function subscribe(string $uid, string $token): array
+    {
+        return ['error' => 'Not supported'];
+    }
+
+    public function unsubscribe(string $uid, string $token): array
+    {
+        $disc = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->post(config('uazapi.base_url') . config('uazapi.endpoints.disconnect'));
+        if ($disc->failed() || $disc->json('error')) return ['error' => $this->formatError($disc->json('error') ?? $disc->json('message'))];
+        return ['success' => true];
+    }
+
+    public function getParticipants(string $uid, string $token, string $phone): array
+    {
+        return [];
+    }
+
+    public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
+    {
+        $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
+        $type = $this->mapType($ext);
+        if ($type === 'invalid') return ['error' => 'Invalid file extension'];
+        $payload = ['number' => $to, 'type' => $type, 'file' => $fileUrl];
+        if (isset($options['caption'])) $payload['text'] = $options['caption'];
+        if (isset($options['fileName']) && $type === 'document') $payload['docName'] = $options['fileName'];
+        if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post(config('uazapi.base_url') . config('uazapi.endpoints.send_document'), $payload);
+        if ($res->failed() || $res->json('error')) {
+            return ['error' => $this->formatError($res->json('error'))];
+        }
+        return $res->json();
+    }
+
+    public function sendLocation(string $uid, string $token, string $to, float $lat, float $lng, array $options = []): array
+    {
+        $payload = ['number' => $to, 'latitude' => $lat, 'longitude' => $lng];
+        if (isset($options['name'])) $payload['name'] = $options['name'];
+        if (isset($options['address'])) $payload['address'] = $options['address'];
+        if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post(config('uazapi.base_url') . config('uazapi.endpoints.send_location'), $payload);
+        if ($res->failed() || $res->json('error')) {
+            return ['error' => $this->formatError($res->json('error'))];
+        }
+        return $res->json();
+    }
+
+    public function sendButtons(string $uid, string $token, string $to, string $message, array $buttons, array $options = []): array
+    {
+        $choices = array_map(fn($b) => ($b['label'] ?? '') . '|' . ($b['id'] ?? ''), $buttons);
+        $payload = ['number' => $to, 'type' => 'button', 'text' => $message, 'choices' => $choices];
+        if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post(config('uazapi.base_url') . config('uazapi.endpoints.send_buttons'), $payload);
+        if ($res->failed() || $res->json('error')) {
+            return ['error' => $this->formatError($res->json('error'))];
+        }
+        return $res->json();
+    }
+
+    public function sendButtonLink(string $uid, string $token, string $to, string $message, string $urlLink, string $label, array $options = []): array
+    {
+        $payload = ['number' => $to, 'type' => 'button', 'text' => $message, 'choices' => [$label . '|' . $urlLink]];
+        if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post(config('uazapi.base_url') . config('uazapi.endpoints.send_buttons'), $payload);
+        if ($res->failed() || $res->json('error')) {
+            return ['error' => $this->formatError($res->json('error'))];
+        }
+        return $res->json();
+    }
+
+    public function sendOptionList(string $uid, string $token, string $to, string $message, string $buttonLabel, array $optionsList, array $extra = []): array
+    {
+        $choices = ['[Opciones]'];
+        foreach ($optionsList as $option) {
+            $row = ($option['title'] ?? '') . '|' . ($option['id'] ?? '');
+            if (isset($option['description'])) $row .= '|' . $option['description'];
+            $choices[] = $row;
+        }
+        $payload = ['number' => $to, 'type' => 'list', 'text' => $message, 'choices' => $choices, 'listButton' => $buttonLabel];
+        if (isset($extra['delayMessage'])) $payload['delay'] = (int) $extra['delayMessage'];
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post(config('uazapi.base_url') . config('uazapi.endpoints.send_list'), $payload);
+        if ($res->failed() || $res->json('error')) {
+            return ['error' => $this->formatError($res->json('error'))];
+        }
+        return $res->json();
+    }
+
+    public function sendPoll(string $uid, string $token, string $to, string $message, array $pollOptions, array $options = []): array
+    {
+        $payload = ['number' => $to, 'type' => 'poll', 'text' => $message, 'choices' => array_values($pollOptions)];
+        if (isset($options['pollMaxOptions'])) $payload['selectableCount'] = (int) $options['pollMaxOptions'];
+        if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post(config('uazapi.base_url') . config('uazapi.endpoints.send_poll'), $payload);
+        if ($res->failed() || $res->json('error')) {
+            return ['error' => $this->formatError($res->json('error'))];
+        }
+        return $res->json();
+    }
+
+    public function sendLink(string $uid, string $token, string $to, string $message, string $linkUrl, array $options = []): array
+    {
+        $payload = ['number' => $to, 'text' => $message . ' ' . $linkUrl, 'linkPreview' => true];
+        if (isset($options['title'])) $payload['linkPreviewTitle'] = $options['title'];
+        if (isset($options['linkDescription'])) $payload['linkPreviewDescription'] = $options['linkDescription'];
+        if (isset($options['image'])) $payload['linkPreviewImage'] = $options['image'];
+        if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post(config('uazapi.base_url') . config('uazapi.endpoints.send_link'), $payload);
+        if ($res->failed() || $res->json('error')) {
+            return ['error' => $this->formatError($res->json('error'))];
+        }
+        return $res->json();
+    }
+
+    public function sendEvent(string $uid, string $token, string $toGroupPhone, array $event, array $options = []): array
+    {
+        $text = "📅 *{$event['name']}*\n\n";
+        if (!empty($event['description'])) $text .= $event['description'] . "\n\n";
+        if (!empty($event['dateTime'])) $text .= '🗓️ Fecha: ' . date('d/m/Y H:i', strtotime($event['dateTime']));
+        if (!empty($event['location'])) {
+            $text .= "\n📍 Ubicación: " . ($event['location']['name'] ?? '');
+            if (!empty($event['location']['address'])) $text .= "\n   " . $event['location']['address'];
+        }
+        if (!empty($event['callLinkType'])) $text .= "\n📞 Tipo: " . ($event['callLinkType'] === 'video' ? 'Videollamada' : 'Llamada de voz');
+        return $this->sendText($uid, $token, $toGroupPhone, $text, $options);
+    }
+
+    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
+    {
+        return ['error' => 'Not supported'];
+    }
+
+    private function mapType(string $ext): string
+    {
+        return [
+            'jpg' => 'image', 'jpeg' => 'image', 'png' => 'image', 'gif' => 'image',
+            'webp' => 'sticker', 'svg' => 'sticker',
+            'pdf' => 'document', 'doc' => 'document', 'docx' => 'document',
+            'mp3' => 'audio', 'ogg' => 'audio', 'aac' => 'audio', 'm4a' => 'audio', 'opus' => 'audio', 'oga' => 'audio', 'wav' => 'audio',
+            'mp4' => 'video', 'mov' => 'video', 'avi' => 'video', 'wmv' => 'video'
+        ][$ext] ?? 'invalid';
+    }
+
     private function formatError(?string $error): string
     {
         if ($error === null) return 'Unknown error';
         return ucfirst(str_replace(['_', '-'], ' ', strtolower($error)));
     }
-}
 
+    public function groups(string $uid, string $token, array $options = []): array
+    {
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.groups');
+        $res = Http::withHeaders(['token' => $token, 'Accept' => 'application/json'])
+            ->timeout(config('uazapi.timeout', 30))
+            ->get($url);
+        if ($res->failed()) {
+            return ['error' => $this->formatError($res->json('error') ?? $res->json('message') ?? 'Unknown error')];
+        }
+        $data = $res->json();
+        $groups = $data['groups'] ?? [];
+        if (!is_array($groups)) $groups = [];
+        return collect($groups)
+            ->filter(fn($g) => isset($g['id']) || isset($g['JID']))
+            ->values()
+            ->toArray();
+    }
+
+    public function adGroups(string $uid, string $token, array $options = []): array
+    {
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.groups');
+        $res = Http::withHeaders(['token' => $token, 'Accept' => 'application/json'])
+            ->timeout(config('uazapi.timeout', 30))
+            ->get($url);
+        if ($res->failed()) {
+            return ['error' => $this->formatError($res->json('error') ?? $res->json('message') ?? 'Unknown error')];
+        }
+        $data = $res->json();
+        $groups = $data['groups'] ?? [];
+        if (!is_array($groups)) $groups = [];
+        return collect($groups)
+            ->filter(fn($g) => ($g['IsAnnounce'] ?? false) === true)
+            ->values()
+            ->toArray();
+    }
+
+    public function group(string $uid, string $token, string $id): array
+    {
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.group');
+        $res = Http::withHeaders(['token' => $token])
+            ->timeout(config('uazapi.timeout', 30))
+            ->asJson()
+            ->post($url, ['groupjid' => str_contains($id, '@g.us') ? $id : ($id . '@g.us')]);
+        if ($res->failed() || $res->json('error')) {
+            return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
+        }
+        return $res->json();
+    }
+
+    public function createGroup(string $uid, string $token, string $name, array $participants, array $options = []): array
+    {
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.create_group');
+        $payload = ['name' => $name, 'participants' => array_values($participants)];
+        $res = Http::withHeaders(['token' => $token])
+            ->timeout(config('uazapi.timeout', 120))
+            ->asJson()
+            ->post($url, $payload);
+        if ($res->failed()) {
+            return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'Group creation failed')];
+        }
+        $data = $res->json();
+        $groupId = $data['group']['JID'] ?? $data['id'] ?? $data['phone'] ?? $data['groupId'] ?? null;
+        if (!$groupId) return ['error' => 'group_id_missing'];
+        if (!empty($options['admins'])) {
+            $this->updateParticipants($token, $groupId, 'promote', $options['admins']);
+        }
+        if (!empty($options['photo'])) {
+            Http::withHeaders(['token' => $token])
+                ->timeout(config('uazapi.timeout', 60))
+                ->asJson()
+                ->post(config('uazapi.base_url') . '/group/updateImage', ['groupjid' => $groupId, 'image' => $options['photo']]);
+        }
+        return $data;
+    }
+
+    public function updateGroupName(string $uid, string $token, string $id, string $name): array
+    {
+        $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
+        $res = Http::withHeaders(['token' => $token])
+            ->timeout(config('uazapi.timeout', 60))
+            ->asJson()
+            ->post(config('uazapi.base_url') . config('uazapi.endpoints.update_group_name'), ['groupjid' => $gid, 'name' => $name]);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error'))];
+        return ['success' => true];
+    }
+
+    public function updateGroupDescription(string $uid, string $token, string $id, string $description): array
+    {
+        $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
+        $res = Http::withHeaders(['token' => $token])
+            ->timeout(config('uazapi.timeout', 60))
+            ->asJson()
+            ->post(config('uazapi.base_url') . config('uazapi.endpoints.update_group_description'), ['groupjid' => $gid, 'description' => $description]);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error'))];
+        return ['success' => true];
+    }
+
+    public function updateGroupSettings(string $uid, string $token, string $id, bool $adminOnlyMessage, bool $adminOnlySettings): array
+    {
+        $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
+        $announce = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 60))->asJson()
+            ->post(config('uazapi.base_url') . config('uazapi.endpoints.update_group_announce'), ['groupjid' => $gid, 'announce' => $adminOnlyMessage]);
+        $locked = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 60))->asJson()
+            ->post(config('uazapi.base_url') . config('uazapi.endpoints.update_group_locked'), ['groupjid' => $gid, 'locked' => $adminOnlySettings]);
+        if ($announce->failed() || $announce->json('error')) return ['error' => $this->formatError($announce->json('error'))];
+        if ($locked->failed() || $locked->json('error')) return ['error' => $this->formatError($locked->json('error'))];
+        return ['success' => true];
+    }
+
+    public function updateGroupPhoto(string $uid, string $token, string $id, string $photoUrl): array
+    {
+        $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
+        $res = Http::withHeaders(['token' => $token])
+            ->timeout(config('uazapi.timeout', 60))
+            ->asJson()
+            ->post(config('uazapi.base_url') . config('uazapi.endpoints.update_group_photo'), ['groupjid' => $gid, 'image' => $photoUrl]);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error'))];
+        return ['success' => true];
+    }
+
+    public function addParticipants(string $uid, string $token, string $id, array $phones): array
+    {
+        $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
+        $res = $this->updateParticipants($token, $gid, 'add', $phones);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
+        return ['success' => true];
+    }
+
+    public function addAdmins(string $uid, string $token, string $id, array $phones): array
+    {
+        $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
+        $res = $this->updateParticipants($token, $gid, 'promote', $phones);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
+        return ['success' => true];
+    }
+
+    public function removeParticipants(string $uid, string $token, string $id, array $phones): array
+    {
+        $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
+        $res = $this->updateParticipants($token, $gid, 'remove', $phones);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
+        return ['success' => true];
+    }
+
+    public function removeAdmins(string $uid, string $token, string $id, array $phones): array
+    {
+        $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
+        $res = $this->updateParticipants($token, $gid, 'demote', $phones);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
+        return ['success' => true];
+    }
+
+    public function leaveGroup(string $uid, string $token, string $id): array
+    {
+        $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.leave_group');
+        $res = Http::withHeaders(['token' => $token])
+            ->timeout(config('uazapi.timeout', 60))
+            ->asJson()
+            ->post($url, ['groupjid' => $gid]);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
+        return ['success' => true];
+    }
+
+    public function communities(string $uid, string $token, array $options = []): array
+    {
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.groups');
+        $res = Http::withHeaders(['token' => $token, 'Accept' => 'application/json'])
+            ->timeout(config('uazapi.timeout', 30))
+            ->get($url);
+        if ($res->failed()) return ['error' => $this->formatError($res->json('error') ?? $res->json('message') ?? 'Unknown error')];
+        $data = $res->json();
+        $groups = $data['groups'] ?? $data ?? [];
+        return collect($groups)->filter(fn($g) => ($g['IsParent'] ?? false) === true)->values()->toArray();
+    }
+
+    public function communitiesMetadata(string $uid, string $token, string $id): array
+    {
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.community_metadata');
+        $res = Http::withHeaders(['token' => $token])
+            ->timeout(config('uazapi.timeout', 60))
+            ->asJson()
+            ->post($url, ['groupjid' => str_contains($id, '@g.us') ? $id : ($id . '@g.us')]);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
+        return $res->json();
+    }
+
+    public function community(string $uid, string $token, array $data): array
+    {
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.create_community');
+        $payload = ['name' => $data['name']];
+        if (!empty($data['description'])) $payload['description'] = $data['description'];
+        $res = Http::withHeaders(['token' => $token])
+            ->timeout(config('uazapi.timeout', 120))
+            ->asJson()
+            ->post($url, $payload);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
+        return $res->json();
+    }
+
+    public function groupInvitationMetadata(string $uid, string $token, string $urlInvite): array
+    {
+        $inviteCode = basename(parse_url($urlInvite, PHP_URL_PATH));
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.group_invitation') . '/' . $inviteCode;
+        $res = Http::withHeaders(['token' => $token])
+            ->timeout(config('uazapi.timeout', 60))
+            ->get($url);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
+        return $res->json();
+    }
+
+    public function chats(string $uid, string $token, array $options = []): array
+    {
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.chats');
+        $filters = [];
+        if (isset($options['pageSize'])) $filters['limit'] = (int) $options['pageSize'];
+        if (isset($options['page']) && isset($options['pageSize'])) $filters['offset'] = ((int) $options['page'] - 1) * (int) $options['pageSize'];
+        $res = Http::withHeaders(['token' => $token])
+            ->timeout(config('uazapi.timeout', 60))
+            ->asJson()
+            ->post($url, $filters);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
+        $chats = $res->json() ?? [];
+        return is_array($chats) ? $chats : [];
+    }
+
+    public function deleteChat(string $uid, string $token, string $phone): array
+    {
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.delete_chat');
+        $res = Http::withHeaders(['token' => $token])
+            ->timeout(config('uazapi.timeout', 60))
+            ->asJson()
+            ->post($url, ['number' => $phone]);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
+        return ['success' => true];
+    }
+
+    public function deleteMessage(string $uid, string $token, string $messageId, string $phone, bool $owner): array
+    {
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.delete_message');
+        $res = Http::withHeaders(['token' => $token])
+            ->timeout(config('uazapi.timeout', 60))
+            ->asJson()
+            ->post($url, ['id' => $messageId]);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
+        return ['success' => true];
+    }
+
+    public function contact(string $uid, string $token, string $phone): array
+    {
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.contacts');
+        $res = Http::withHeaders(['token' => $token])
+            ->timeout(config('uazapi.timeout', 60))
+            ->get($url);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('message') ?? $res->json('error'))];
+        $contacts = $res->json();
+        $target = collect($contacts)->first(function ($c) use ($phone) {
+            $jid = $c['jid'] ?? '';
+            return str_starts_with($jid, $phone . '@') || str_starts_with($jid, $phone . ':');
+        });
+        return $target ?: ['error' => 'Contact not found'];
+    }
+
+    public function contacts(string $uid, string $token, array $options = []): array
+    {
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.contacts');
+        $res = Http::withHeaders(['token' => $token])
+            ->timeout(config('uazapi.timeout', 60))
+            ->get($url);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('message') ?? $res->json('error'))];
+        $data = $res->json();
+        return is_array($data) ? $data : [];
+    }
+
+    public function sendContact(string $uid, string $token, string $to, string $contactName, string $contactPhone, array $options = []): array
+    {
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.send_contact');
+        $payload = ['number' => $to, 'fullName' => $contactName, 'phoneNumber' => $contactPhone];
+        if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
+        $res = Http::withHeaders(['token' => $token])
+            ->timeout(config('uazapi.timeout', 60))
+            ->asJson()
+            ->post($url, $payload);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error'))];
+        return $res->json();
+    }
+
+    private function updateParticipants(string $token, string $groupjid, string $action, array $phones)
+    {
+        return Http::withHeaders(['token' => $token])
+            ->timeout(config('uazapi.timeout', 60))
+            ->asJson()
+            ->post(config('uazapi.base_url') . '/group/updateParticipants', [
+                'groupjid' => $groupjid,
+                'action' => $action,
+                'participants' => array_values($phones)
+            ]);
+    }
+
+    public function showQueue(string $uid, string $token, array $options = []): array
+    {
+        return [];
+    }
+
+    public function queueCount(string $uid, string $token): array
+    {
+        return ['count' => 0];
+    }
+
+    public function deleteQueueMessage(string $uid, string $token, string $messageQueueUid): array
+    {
+        return ['success' => true];
+    }
+
+    public function clearQueue(string $uid, string $token): array
+    {
+        return ['success' => true];
+    }
+}
