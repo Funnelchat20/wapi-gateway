@@ -8,6 +8,7 @@ use Funnelchat\WapiGateway\Contracts\GroupsContract;
 use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\QueueContract;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Http\Client\ConnectionException;
 
 class ZApiClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract
 {
@@ -15,14 +16,42 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
     {
+        $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-text'], self::BASE);
         $payload = ['phone' => $to, 'message' => $text];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
-        $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(120)->post($url, $payload);
-        if ($res->failed() || $res->json('error')) {
-            return ['error' => $this->formatError($res->json('error', 'error'))];
+
+        $request = Http::withHeaders(['Client-Token' => config('zapi.client_token')])
+            ->timeout(config('zapi.timeout', 120));
+
+        // Apply retry logic if enabled in options
+        if ($options['retry'] ?? false) {
+            $request = $request->retry(
+                config('zapi.max_attempts', 2),
+                config('zapi.retry_delay', 500),
+                function ($exception, $request) {
+                    // Don't retry on timeout (prevents duplicates)
+                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
+                        str_contains($exception->getMessage(), 'cURL error 28')) {
+                        return false;
+                    }
+                    // Only retry on ConnectionException
+                    return $exception instanceof ConnectionException;
+                },
+                false
+            );
         }
+
+        $res = $request->post($url, $payload);
+
+        if ($res->failed() || $res->json('error')) {
+            $error = $this->formatError($res->json('error', 'error'));
+            $this->logRequest('sendText', $uid, ['error' => $error, 'phone' => $to], $startTime, $res);
+            return ['error' => $error];
+        }
+
+        $this->logRequest('sendText', $uid, ['phone' => $to, 'has_retry' => $options['retry'] ?? false], $startTime, $res);
         return $res->json();
     }
 
@@ -125,6 +154,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
+        $startTime = microtime(true);
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $action = $this->mapAction($ext);
         if ($action === 'invalid') return ['error' => 'Invalid file extension'];
@@ -136,11 +166,57 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, $action], self::BASE);
-        $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(120)->post($url, $params);
-        if ($res->failed() || $res->json('error')) {
-            return ['error' => $this->formatError($res->json('error', 'error'))];
+
+        // Automatically enable async processing for video files (improves performance and prevents timeouts)
+        // Can be explicitly disabled by setting $options['async'] = false
+        $isVideo = in_array($ext, ['mp4', 'mov', 'gif']);
+        if ($isVideo && !isset($options['async'])) {
+            $params['async'] = true;
+        } elseif (isset($options['async'])) {
+            $params['async'] = (bool) $options['async'];
         }
+
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, $action], self::BASE);
+
+        $request = Http::withHeaders(['Client-Token' => config('zapi.client_token')])
+            ->timeout(config('zapi.timeout', 120));
+
+        // Apply retry logic if enabled in options
+        if ($options['retry'] ?? false) {
+            $request = $request->retry(
+                config('zapi.max_attempts', 2),
+                config('zapi.retry_delay', 500),
+                function ($exception, $request) {
+                    // Don't retry on timeout (prevents duplicates)
+                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
+                        str_contains($exception->getMessage(), 'cURL error 28')) {
+                        return false;
+                    }
+                    // Only retry on ConnectionException
+                    return $exception instanceof ConnectionException;
+                },
+                false
+            );
+        }
+
+        $res = $request->post($url, $params);
+
+        $context = [
+            'phone' => $to,
+            'file_type' => $ext,
+            'action' => $action,
+            'is_async' => $params['async'] ?? false,
+            'has_retry' => $options['retry'] ?? false,
+        ];
+
+        if ($res->failed() || $res->json('error')) {
+            $error = $this->formatError($res->json('error', 'error'));
+            $context['error'] = $error;
+            $this->logRequest('sendFile', $uid, $context, $startTime, $res);
+            return ['error' => $error];
+        }
+
+        $this->logRequest('sendFile', $uid, $context, $startTime, $res);
         return $res->json();
     }
 
@@ -165,7 +241,27 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $params = ['phone' => $to, 'message' => $message, 'buttonList' => ['buttons' => $buttons]];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-button-list'], self::BASE);
-        $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(120)->post($url, $params);
+
+        $request = Http::withHeaders(['Client-Token' => config('zapi.client_token')])
+            ->timeout(config('zapi.timeout', 120));
+
+        // Apply retry logic if enabled in options
+        if ($options['retry'] ?? false) {
+            $request = $request->retry(
+                config('zapi.max_attempts', 2),
+                config('zapi.retry_delay', 500),
+                function ($exception, $request) {
+                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
+                        str_contains($exception->getMessage(), 'cURL error 28')) {
+                        return false;
+                    }
+                    return $exception instanceof ConnectionException;
+                },
+                false
+            );
+        }
+
+        $res = $request->post($url, $params);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error', 'error'))];
         }
@@ -202,7 +298,27 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['pollMaxOptions'])) $params['pollMaxOptions'] = (int) $options['pollMaxOptions'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-poll'], self::BASE);
-        $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(120)->post($url, $params);
+
+        $request = Http::withHeaders(['Client-Token' => config('zapi.client_token')])
+            ->timeout(config('zapi.timeout', 120));
+
+        // Apply retry logic if enabled in options
+        if ($options['retry'] ?? false) {
+            $request = $request->retry(
+                config('zapi.max_attempts', 2),
+                config('zapi.retry_delay', 500),
+                function ($exception, $request) {
+                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
+                        str_contains($exception->getMessage(), 'cURL error 28')) {
+                        return false;
+                    }
+                    return $exception instanceof ConnectionException;
+                },
+                false
+            );
+        }
+
+        $res = $request->post($url, $params);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error', 'error'))];
         }
@@ -476,6 +592,45 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return ['success' => true];
     }
 
+    /**
+     * Log request with performance metrics
+     *
+     * @param string $method The method name being executed
+     * @param string $uid Instance UID
+     * @param array $context Additional context data
+     * @param float|null $startTime Start time for duration calculation
+     * @param mixed $response Response object or data
+     * @return void
+     */
+    private function logRequest(string $method, string $uid, array $context = [], ?float $startTime = null, $response = null): void
+    {
+        $logData = [
+            'method' => $method,
+            'instance_uid' => $uid,
+        ];
+
+        // Add request duration if start time provided
+        if ($startTime !== null) {
+            $logData['request_time_ms'] = (int)((microtime(true) - $startTime) * 1000);
+        }
+
+        // Add response status if available
+        if ($response && method_exists($response, 'status')) {
+            $logData['status_code'] = $response->status();
+            $logData['success'] = $response->successful();
+        }
+
+        // Merge additional context
+        $logData = array_merge($logData, $context);
+
+        // Log at appropriate level
+        if (isset($context['error'])) {
+            logger()->error("wapi-gateway.zapi.{$method}.error", $logData);
+        } else {
+            logger()->info("wapi-gateway.zapi.{$method}", $logData);
+        }
+    }
+
     private function formatError(string $error): string
     {
         return match ($error) {
@@ -522,5 +677,72 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $res = Http::withHeaders(['accept' => 'application/json', 'client-token' => env('ZAPI_CLIENT_TOKEN', '')])->delete($url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
+    }
+
+    /**
+     * Delete multiple messages concurrently using HTTP pool for parallel requests.
+     * This provides significantly better performance compared to sequential deletions.
+     *
+     * @param string $uid Instance UID
+     * @param string $token Instance token
+     * @param array $deleteRequests Array of deletion requests, each containing:
+     *                              - messageId: The message ID to delete
+     *                              - phone: The phone number (group or contact)
+     *                              - owner: Boolean indicating if message is owned by sender
+     * @return array Array of responses indexed by messageId
+     */
+    public function deleteMessagesConcurrently(string $uid, string $token, array $deleteRequests): array
+    {
+        $clientToken = config('zapi.client_token');
+        $headers = [
+            'Content-Type' => 'application/json',
+            'Client-Token' => $clientToken
+        ];
+
+        // Build all delete requests for the pool
+        $requests = collect($deleteRequests)->map(function ($params) use ($uid, $token, $headers) {
+            $messageId = $params['messageId'];
+            $phone = $params['phone'];
+            $owner = $params['owner'] ?? false;
+
+            // Build the URL with query parameters
+            $base = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'messages'], self::BASE);
+            $query = http_build_query(['messageId' => $messageId, 'phone' => $phone]) . ($owner ? '&owner=true' : '');
+            $url = $base . '?' . $query;
+
+            // Return a closure that will be executed in the pool
+            return fn($pool) => $pool->as($messageId)
+                ->withHeaders($headers)
+                ->timeout(config('zapi.timeout', 29))
+                ->delete($url);
+        });
+
+        logger()->info('wapi-gateway.zapi.delete_messages_concurrently', [
+            'instance_uid' => $uid,
+            'request_count' => count($deleteRequests),
+            'message_ids' => collect($deleteRequests)->pluck('messageId')->toArray()
+        ]);
+
+        // Execute all requests in parallel using HTTP pool
+        $responses = Http::pool(fn($pool) => $requests->map(fn($req) => $req($pool))->all());
+
+        // Process responses and format errors if needed
+        $results = [];
+        foreach ($responses as $messageId => $response) {
+            if ($response->failed() || $response->json('error')) {
+                $results[$messageId] = ['error' => $this->formatError($response->json('error', 'error'))];
+            } else {
+                $results[$messageId] = $response->json() ?? ['success' => true];
+            }
+        }
+
+        logger()->info('wapi-gateway.zapi.delete_messages_concurrently.completed', [
+            'instance_uid' => $uid,
+            'total_requests' => count($deleteRequests),
+            'successful' => count(array_filter($results, fn($r) => !isset($r['error']))),
+            'failed' => count(array_filter($results, fn($r) => isset($r['error'])))
+        ]);
+
+        return $results;
     }
 }
