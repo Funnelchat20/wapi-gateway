@@ -24,7 +24,7 @@ Agrega en `composer.json` del proyecto host:
 ```
 e instala:
 ```bash
-composer require funnelchat20/wapi-gateway:*@dev
+composer require funnelchat20/wapi-gateway:^1.3
 ```
 
 ## Configuración
