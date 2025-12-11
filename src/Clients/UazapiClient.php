@@ -146,9 +146,9 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return $res->json();
     }
 
-    public function sendButtonLink(string $uid, string $token, string $to, string $message, string $urlLink, string $label, array $options = []): array
+    public function sendButtonLink(string $uid, string $token, string $to, string $message, string $url, string $label, array $options = []): array
     {
-        $payload = ['number' => $to, 'type' => 'button', 'text' => $message, 'choices' => [$label . '|' . $urlLink]];
+        $payload = ['number' => $to, 'type' => 'button', 'text' => $message, 'choices' => [$label . '|' . $url]];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post(config('uazapi.base_url') . config('uazapi.endpoints.send_buttons'), $payload);
         if ($res->failed() || $res->json('error')) {
@@ -435,9 +435,9 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return $res->json();
     }
 
-    public function groupInvitationMetadata(string $uid, string $token, string $urlInvite): array
+    public function groupInvitationMetadata(string $uid, string $token, string $url): array
     {
-        $inviteCode = basename(parse_url($urlInvite, PHP_URL_PATH));
+        $inviteCode = basename(parse_url($url, PHP_URL_PATH));
         $url = config('uazapi.base_url') . config('uazapi.endpoints.group_invitation') . '/' . $inviteCode;
         $res = Http::withHeaders(['token' => $token])
             ->timeout(config('uazapi.timeout', 60))

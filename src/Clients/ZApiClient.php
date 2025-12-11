@@ -268,9 +268,9 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return $res->json();
     }
 
-    public function sendButtonLink(string $uid, string $token, string $to, string $message, string $urlLink, string $label, array $options = []): array
+    public function sendButtonLink(string $uid, string $token, string $to, string $message, string $url, string $label, array $options = []): array
     {
-        $params = ['phone' => $to, 'message' => $message, 'buttonActions' => [['type' => 'URL', 'url' => $urlLink, 'label' => $label]]];
+        $params = ['phone' => $to, 'message' => $message, 'buttonActions' => [['type' => 'URL', 'url' => $url, 'label' => $label]]];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-button-actions'], self::BASE);
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(120)->post($url, $params);
@@ -555,10 +555,10 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return $res->json();
     }
 
-    public function groupInvitationMetadata(string $uid, string $token, string $urlInvite): array
+    public function groupInvitationMetadata(string $uid, string $token, string $url): array
     {
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'group-invitation-metadata'], self::BASE);
-        $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url, ['url' => $urlInvite]);
+        $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url, ['url' => $url]);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('message') ?? $res->json('error', 'error'))];
         return $res->json();
     }

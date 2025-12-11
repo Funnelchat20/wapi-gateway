@@ -76,7 +76,13 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 'type' => 'button',
                 'body' => ['text' => $message],
                 'action' => [
-                    'buttons' => array_map(fn($b) => ['type' => 'reply', 'reply' => ['id' => $b['id'], 'title' => $b['label']]], $buttons)
+                    'buttons' => array_map(fn($b) => [
+                        'type' => 'reply',
+                        'reply' => [
+                            'id' => $b['id'],
+                            'title' => $b['label'] ?? $b['text'] ?? $b['title'] // Accept multiple formats
+                        ]
+                    ], $buttons)
                 ]
             ]
         ];
@@ -91,7 +97,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return $res->json();
     }
 
-    public function sendButtonLink(string $uid, string $token, string $to, string $message, string $urlLink, string $label, array $options = []): array
+    public function sendButtonLink(string $uid, string $token, string $to, string $message, string $url, string $label, array $options = []): array
     {
         $payload = [
             'messaging_product' => 'whatsapp',
@@ -100,7 +106,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'interactive' => [
                 'type' => 'cta_url',
                 'body' => ['text' => $message],
-                'action' => ['name' => 'cta_url', 'parameters' => ['display_text' => $label, 'url' => $urlLink]]
+                'action' => ['name' => 'cta_url', 'parameters' => ['display_text' => $label, 'url' => $url]]
             ]
         ];
         $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
@@ -110,6 +116,31 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function sendOptionList(string $uid, string $token, string $to, string $message, string $buttonLabel, array $optionsList, array $extra = []): array
     {
+        // Support both formats: with sections or flat array
+        // If first element has 'rows' key, it's already in sections format
+        // Otherwise, wrap it in a section
+        if (isset($optionsList[0]['rows'])) {
+            // Already has sections structure
+            $sections = array_map(fn($section) => [
+                'title' => $section['title'] ?? 'Options',
+                'rows' => array_map(fn($row) => [
+                    'id' => $row['id'],
+                    'title' => $row['title'],
+                    'description' => $row['description'] ?? ''
+                ], $section['rows'])
+            ], $optionsList);
+        } else {
+            // Flat array, wrap in a section
+            $sections = [[
+                'title' => 'Options',
+                'rows' => array_map(fn($o) => [
+                    'id' => $o['id'],
+                    'title' => $o['title'],
+                    'description' => $o['description'] ?? ''
+                ], $optionsList)
+            ]];
+        }
+
         $payload = [
             'messaging_product' => 'whatsapp',
             'to' => $to,
@@ -119,10 +150,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 'body' => ['text' => $message],
                 'action' => [
                     'button' => $buttonLabel,
-                    'sections' => [[
-                        'title' => 'LIST',
-                        'rows' => array_map(fn($o) => ['id' => $o['id'], 'title' => $o['title']], $optionsList)
-                    ]]
+                    'sections' => $sections
                 ]
             ]
         ];
