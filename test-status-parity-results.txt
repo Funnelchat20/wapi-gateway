@@ -1,0 +1,103 @@
+═══════════════════════════════════════════════════════════════════════════
+ANÁLISIS DE PARIDAD DEL ENDPOINT STATUS - wapi-gateway
+═══════════════════════════════════════════════════════════════════════════
+Fecha: 2025-12-16
+Script: test-status-parity.php
+
+───────────────────────────────────────────────────────────────────────────
+HALLAZGOS PRINCIPALES
+───────────────────────────────────────────────────────────────────────────
+
+✅ FUNAPI (Whatsmeow Bridge):
+   - SÍ retorna el campo 'accountStatus' 
+   - Valor: "authenticated" (incluso con error)
+   - Comportamiento CORRECTO según spec WAPI
+   - Tiempo de respuesta: ~480ms
+
+❌ ZAPI:
+   - NO retorna 'accountStatus' cuando hay error de autenticación
+   - Error: "Client-Token dummy-token-for-test not allowed"
+   - Necesita credenciales válidas para completar test
+   - Tiempo de respuesta: ~411ms
+
+❌ UAZAPI:
+   - NO retorna 'accountStatus' cuando hay error de token
+   - Error: "Invalid token."
+   - Necesita credenciales válidas para completar test
+   - Tiempo de respuesta: ~503ms
+
+❌ META (WhatsApp Cloud):
+   - No soporta operaciones de instancias
+   - Retorna: {"error": "Not supported"}
+   - Esperado - Meta usa modelo diferente
+
+───────────────────────────────────────────────────────────────────────────
+CONSISTENCIA DE RESPUESTAS
+───────────────────────────────────────────────────────────────────────────
+
+Campo              | ZApi  | Funapi | Uazapi | Meta
+──────────────────────────────────────────────────────
+error              | ✓     | ✓      | ✓      | ✓
+connected          | ✗     | ✓      | ✗      | ✗
+smartphoneConnected| ✗     | ✓      | ✗      | ✗
+accountStatus      | ✗     | ✅     | ✗      | ✗
+
+SCORE: 1/4 proveedores (25%) retornan 'accountStatus' consistentemente
+
+───────────────────────────────────────────────────────────────────────────
+RECOMENDACIONES
+───────────────────────────────────────────────────────────────────────────
+
+1. 🔧 ZApiClient::status()
+   - Agregar 'accountStatus' en respuestas de error
+   - Verificar que siempre retorne este campo (como Funapi)
+
+2. 🔧 UazapiClient::status()
+   - Agregar 'accountStatus' en respuestas de error
+   - Normalizar errores al formato esperado
+
+3. ✅ FunapiClient::status()
+   - Ya implementa correctamente el campo accountStatus
+   - Mantener este comportamiento como referencia
+
+4. 📋 Próximos pasos:
+   - Obtener credenciales válidas para ZApi y Uazapi
+   - Ejecutar test completo con instancias reales
+   - Probar estados: authenticated, got qr code, disconnected
+   - Verificar obtención automática de QR code
+
+───────────────────────────────────────────────────────────────────────────
+CÓDIGO DE EJEMPLO - Comportamiento esperado
+───────────────────────────────────────────────────────────────────────────
+
+// Estado: Autenticado
+{
+  "connected": true,
+  "smartphoneConnected": true,
+  "accountStatus": "authenticated"  // ← SIEMPRE presente
+}
+
+// Estado: Esperando QR
+{
+  "connected": false,
+  "accountStatus": "got qr code",   // ← SIEMPRE presente
+  "value": "data:image/png;base64,..."
+}
+
+// Estado: Error
+{
+  "error": "instance_not_found",
+  "accountStatus": "error"          // ← SIEMPRE presente
+}
+
+───────────────────────────────────────────────────────────────────────────
+SCRIPTS ADICIONALES PENDIENTES
+───────────────────────────────────────────────────────────────────────────
+
+- test-qrcode-parity.php
+- test-send-text-parity.php
+- test-send-file-parity.php
+- test-logout-parity.php
+- test-create-instance-parity.php
+
+═══════════════════════════════════════════════════════════════════════════

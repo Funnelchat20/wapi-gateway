@@ -1,0 +1,115 @@
+═══════════════════════════════════════════════════════════════════════════
+INVESTIGACIÓN: FALLOS EN sendText() y checkPhone()
+═══════════════════════════════════════════════════════════════════════════
+Fecha: 2025-12-16 14:40 UTC
+
+───────────────────────────────────────────────────────────────────────────
+🔍 HALLAZGOS PRINCIPALES
+───────────────────────────────────────────────────────────────────────────
+
+FUNAPI (Whatsmeow Bridge):
+❌ sendText() - ENDPOINT NO IMPLEMENTADO
+   - Status Code: 404 Not Found
+   - URL testeada: /instances/{id}/token/{token}/send-text
+   - Verificación: Postman collection incluye el endpoint
+   - Realidad: El servidor no lo tiene implementado
+   - Endpoints que SÍ funcionan:
+     ✅ /status (200)
+     ✅ /qr-code/image (409 - esperado cuando conectado)
+     ✅ /device (200)
+     ✅ /disconnect (200)
+
+❌ checkPhone() - ENDPOINT NO IMPLEMENTADO
+   - No encontrado en Postman collection
+   - Probablemente no soportado por Whatsmeow
+
+UAZAPI:
+✅ sendText() - FUNCIONA PERFECTAMENTE
+   - Endpoint: POST /send/text
+   - Payload: {"number":"5493764734151","text":"mensaje"}
+   - Response exitosa con todos los campos:
+     {
+       "id": "3EB00AB156CE11E7419871",
+       "messageid": "3EB00AB156CE11E7419871", 
+       "status": "Pending",
+       "chatid": "5493764734151@s.whatsapp.net",
+       ...
+     }
+   
+❓ checkPhone() - NO VERIFICADO
+   - Requiere investigación de endpoint correcto
+
+───────────────────────────────────────────────────────────────────────────
+🐛 PROBLEMA EN LOS TESTS
+───────────────────────────────────────────────────────────────────────────
+
+El test reportó error en Uazapi.sendText() pero el curl FUNCIONA.
+
+POSIBLE CAUSA:
+1. El código del cliente Uazapi puede tener un bug
+2. El Resource parser puede estar fallando
+3. HTTP response puede estar interpretándose mal
+
+VERIFICAR:
+- UazapiClient::sendText() línea 37-41
+- MessageResource de Uazapi
+- Manejo de respuesta HTTP
+
+───────────────────────────────────────────────────────────────────────────
+📊 RESUMEN COMPARATIVO
+───────────────────────────────────────────────────────────────────────────
+
+Endpoint     | ZApi  | Funapi | Uazapi | Notas
+─────────────────────────────────────────────────────────────────────────
+status()     | ✅    | ✅     | ✅     | 100% compatible
+me()         | ✅    | ✅     | ✅     | Funcional
+checkPhone() | ✅    | ❌     | ❓     | Funapi no lo tiene
+sendText()   | ✅    | ❌     | ✅*    | *Curl OK, test falla
+
+───────────────────────────────────────────────────────────────────────────
+🔧 ACCIONES CORRECTIVAS
+───────────────────────────────────────────────────────────────────────────
+
+PRIORIDAD ALTA:
+1. ✅ CONFIRMADO: Funapi NO tiene implementado send-text
+   Acción: Documentar limitación o implementar en Funapi server
+   
+2. 🔍 INVESTIGAR: Por qué Uazapi falla en test pero funciona en curl
+   Acción: Debuggear UazapiClient::sendText() y MessageResource
+   
+3. 🔍 INVESTIGAR: checkPhone en Uazapi
+   Acción: Buscar endpoint correcto en documentación
+
+PRIORIDAD MEDIA:
+4. Actualizar documentación con endpoints no soportados
+5. Agregar tests de skip para endpoints no implementados
+6. Considerar implementar send-text en Funapi
+
+───────────────────────────────────────────────────────────────────────────
+💡 CONCLUSIONES
+───────────────────────────────────────────────────────────────────────────
+
+1. Funapi (Whatsmeow) está incompleto
+   - Es un bridge nuevo, no todos los endpoints implementados
+   - Los endpoints core (status, qr, device) funcionan
+   - Falta implementar envío de mensajes
+
+2. Uazapi funciona mejor de lo esperado
+   - El sendText() SÍ funciona (verificado con curl)
+   - Hay un bug en el test o en el cliente PHP
+   - Necesita debug del código cliente
+
+3. ZApi sigue siendo la referencia
+   - Todos los endpoints funcionan
+   - Implementación más completa
+
+───────────────────────────────────────────────────────────────────────────
+🎯 PRÓXIMOS PASOS INMEDIATOS
+───────────────────────────────────────────────────────────────────────────
+
+1. Debuggear UazapiClient::sendText() para ver por qué falla en test
+2. Verificar MessageResource de Uazapi
+3. Actualizar test para marcar Funapi.sendText() como "Not Implemented"
+4. Buscar endpoint de checkPhone en Uazapi docs
+
+═══════════════════════════════════════════════════════════════════════════

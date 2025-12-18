@@ -1,0 +1,90 @@
+# Comparación Completa de Endpoints: WAPI Original vs wapi-gateway
+
+## ENDPOINTS DEL WAPI ORIGINAL (routes/api.php)
+
+### Gestión de Instancias
+1. POST /instances - create
+2. POST /instances/{uid}/{token}/subscribe
+3. POST /instances/{uid}/{token}/unsubscribe
+4. POST /instances/{uid}/{token}/get-participants/{phone}
+
+### Autenticación y Estado
+5. POST /instances/{uid}/login
+6. GET /instances/{uid}/status
+7. GET /instances/{uid}/qr_code
+8. GET /instances/{uid}/logout
+9. GET /instances/{uid}/reboot
+
+### Perfil y Validación
+10. GET /instances/{uid}/me
+11. GET /instances/{uid}/checkPhone
+
+### Webhooks
+12. PUT /instances/{uid}/update-webhook-received
+13. PUT /instances/{uid}/update-webhook-received-and-delivery
+
+### Contactos
+14. GET /instances/{uid}/contact
+15. GET /instances/{uid}/contacts
+
+### Envío de Mensajes (Simple)
+16. POST /instances/{uid}/send-contact
+17. POST /instances/{uid}/send-message (texto simple)
+18. POST /instances/{uid}/send-file (archivos)
+19. POST /instances/{uid}/send-location
+20. POST /instances/{uid}/send-link
+
+### Envío de Mensajes (Interactivos)
+21. POST /instances/{uid}/send-button-link
+22. POST /instances/{uid}/send-buttons
+23. POST /instances/{uid}/send-option-list
+24. POST /instances/{uid}/send-poll
+25. POST /instances/{uid}/send-event
+
+### Templates
+26. POST /instances/{uid}/send-template
+27. GET /instances/{uid}/templates
+28. GET /instances/{uid}/template
+29. POST /instances/{uid}/template
+30. POST /instances/{uid}/template/update
+31. POST /instances/{uid}/template/upload-file
+32. DELETE /instances/{uid}/template
+
+### Grupos
+33. GET /instances/{uid}/groups-debug
+34. GET /instances/{uid}/groups
+35. GET /instances/{uid}/ad-groups
+36. GET /instances/{uid}/group
+37. POST /instances/{uid}/group (createGroup)
+38. POST /instances/{uid}/update-group-name
+39. POST /instances/{uid}/update-group-description
+40. POST /instances/{uid}/update-group-settings
+41. POST /instances/{uid}/update-group-photo
+42. POST /instances/{uid}/add-participants
+43. POST /instances/{uid}/add-admins
+44. POST /instances/{uid}/remove-participants
+45. POST /instances/{uid}/remove-admins
+46. POST /instances/{uid}/leave-group
+47. GET /instances/{uid}/group-invitation-metadata
+
+### Comunidades
+48. POST /instances/{uid}/community
+49. GET /instances/{uid}/communities
+50. GET /instances/{uid}/community (metadata)
+
+### Chats
+51. GET /instances/{uid}/chats
+52. POST /instances/{uid}/delete-chat
+53. POST /instances/{uid}/delete-message
+
+### Cola de Mensajes
+54. GET /instances/{uid}/message-queue
+55. GET /instances/{uid}/message-queue/count
+56. DELETE /instances/{uid}/message-queue
+57. DELETE /instances/{uid}/message-queue/all (clearQueue)
+
+### Otros
+58. POST /instances/{uid}/update-participants-phone
+
+TOTAL: 58 endpoints en WAPI original
+

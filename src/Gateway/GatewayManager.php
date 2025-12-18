@@ -6,6 +6,7 @@ use Funnelchat\WapiGateway\Enums\ProviderEnum;
 use Funnelchat\WapiGateway\Clients\ZApiClient;
 use Funnelchat\WapiGateway\Clients\UazapiClient;
 use Funnelchat\WapiGateway\Clients\MetaClient;
+use Funnelchat\WapiGateway\Clients\FunapiClient;
 
 class GatewayManager
 {
@@ -13,6 +14,7 @@ class GatewayManager
         private ZApiClient $zapi,
         private UazapiClient $uazapi,
         private MetaClient $meta,
+        private FunapiClient $funapi,
     ) {
     }
 
@@ -22,6 +24,7 @@ class GatewayManager
             ProviderEnum::ZApi => $this->zapi,
             ProviderEnum::Uazapi => $this->uazapi,
             ProviderEnum::WhatsAppCloud => $this->meta,
+            ProviderEnum::Funapi => $this->funapi,
         };
     }
 
@@ -31,6 +34,7 @@ class GatewayManager
             ProviderEnum::ZApi => $this->zapi,
             ProviderEnum::Uazapi => $this->uazapi,
             ProviderEnum::WhatsAppCloud => $this->meta,
+            ProviderEnum::Funapi => $this->funapi,
         };
     }
 
@@ -40,6 +44,7 @@ class GatewayManager
             ProviderEnum::ZApi => $this->zapi,
             ProviderEnum::Uazapi => $this->uazapi,
             ProviderEnum::WhatsAppCloud => $this->meta,
+            ProviderEnum::Funapi => $this->funapi,
         };
     }
 
@@ -49,6 +54,7 @@ class GatewayManager
             ProviderEnum::ZApi => $this->zapi,
             ProviderEnum::Uazapi => $this->uazapi,
             ProviderEnum::WhatsAppCloud => $this->meta,
+            ProviderEnum::Funapi => $this->funapi,
         };
     }
 
@@ -63,6 +69,7 @@ class GatewayManager
             ProviderEnum::ZApi => $this->zapi,
             ProviderEnum::Uazapi => $this->uazapi,
             ProviderEnum::WhatsAppCloud => $this->meta,
+            ProviderEnum::Funapi => $this->funapi,
         };
     }
 }

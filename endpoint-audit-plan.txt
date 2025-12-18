@@ -1,0 +1,41 @@
+# Plan de Auditoría de Endpoints - WAPI Compliance
+
+## Endpoints a Auditar (Orden de Prioridad)
+
+### 🔴 CRÍTICOS (Core messaging)
+1. ✅ status() - YA CORREGIDO
+2. qrCode()
+3. sendText() / sendMessage()
+4. me() / device()
+5. logout() / disconnect()
+6. reboot() / restart()
+
+### 🟡 IMPORTANTES (Validación y gestión)
+7. checkPhone()
+8. contacts()
+9. contact()
+10. MessageResource (sendText, sendImage, sendAudio, etc.)
+
+### 🟢 SECUNDARIOS (Grupos y colas)
+11. groups()
+12. group()
+13. createGroup()
+14. queue operations
+15. chats()
+
+### 🔵 ADICIONALES (Features avanzados)
+16. communities
+17. adGroups
+18. templates
+19. clearQueue
+
+## Metodología de Auditoría
+
+Para cada endpoint:
+1. Ver Resource del WAPI original (Zapi + Uazapi)
+2. Comparar con wapi-gateway actual
+3. Identificar campos que deben retornar
+4. Verificar particularidades (llamadas internas, transformaciones)
+5. Implementar correcciones
+6. Ejecutar test de validación
+

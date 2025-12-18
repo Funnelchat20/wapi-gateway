@@ -38,7 +38,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
         }
-        return MessageResource::make($res->json());
+        return $res->json();
     }
 
     public function create(int $userId, int $deviceId): array
@@ -76,41 +76,33 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
             return ['error' => $this->formatError($data['error'])];
         }
 
-        // Extract instance status from nested structure
-        $instanceStatus = $data['instance']['status'] ?? self::DISCONNECTED;
-        
-        // ALWAYS add accountStatus field (WAPI compatibility)
-        $accountStatus = match ($instanceStatus) {
-            self::CONNECTED => 'authenticated',
-            self::CONNECTING => 'got qr code',
-            self::DISCONNECTED => 'got qr code',
-            default => 'got qr code',
-        };
-        
-        $qrCode = '';
+        // The actual status is in instance.status, not in root status
+        $actualStatus = $data['instance']['status'] ?? self::DISCONNECTED;
 
-        // If not connected, MAKE SECOND API CALL to get QR code automatically (like ZApi)
-        if ($instanceStatus !== self::CONNECTED) {
+        // ALWAYS add accountStatus field based on instance status
+        $data['accountStatus'] = match ($actualStatus) {
+            self::CONNECTED => 'authenticated',
+            self::CONNECTING => 'connecting',
+            self::DISCONNECTED => 'disconnected',
+            default => 'unknown_status: ' . $actualStatus,
+        };
+
+        // If not connected, MAKE SECOND API CALL to get QR code automatically
+        if (in_array($actualStatus, [self::DISCONNECTED, self::CONNECTING])) {
             $qrUrl = config('uazapi.base_url') . config('uazapi.endpoints.qr_code');
             $qrRes = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->post($qrUrl);
-            
-            if (!$qrRes->failed()) {
-                $qrData = $qrRes->json();
-                
-                // Extract qrcode from response (it's in instance.qrcode)
-                $qrcode = $qrData['instance']['qrcode'] ?? $qrData['qrcode'] ?? null;
-                
-                if (!empty($qrcode)) {
-                    $qrCode = $qrcode;
-                }
+            $qrData = $qrRes->json();
+
+            // Extract qrcode from response (it's in instance.qrcode)
+            $qrcode = $qrData['instance']['qrcode'] ?? $qrData['qrcode'] ?? null;
+
+            if (!empty($qrcode)) {
+                $data['accountStatus'] = 'got qr code';
+                $data['qrCode'] = $qrcode;
             }
         }
 
-        // Return ONLY the fields that WAPI original returns (StatusResource)
-        return [
-            'accountStatus' => $accountStatus,
-            'qrCode' => $qrCode,
-        ];
+        return $data;
     }
 
     public function qrCode(string $uid, string $token): array
@@ -127,7 +119,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         $url = config('uazapi.base_url') . config('uazapi.endpoints.disconnect');
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->post($url);
         if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
-        return LogOutResource::make($res->json());
+        return $res->json();
     }
 
     public function reboot(string $uid, string $token): array
@@ -143,7 +135,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
     {
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->get(config('uazapi.base_url') . config('uazapi.endpoints.status'));
         if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
-        return MeResource::make($res->json());
+        return $res->json();
     }
 
     public function checkPhone(string $uid, string $token, string $phone): array
@@ -151,7 +143,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         $url = config('uazapi.base_url') . '/contact/checkPhone/' . $phone;
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->get($url);
         if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
-        return CheckPhoneResource::make($res->json());
+        return $res->json();
     }
 
     public function subscribe(string $uid, string $token): array
@@ -184,7 +176,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error'))];
         }
-        return MessageResource::make($res->json());
+        return $res->json();
     }
 
     public function sendLocation(string $uid, string $token, string $to, float $lat, float $lng, array $options = []): array
@@ -197,7 +189,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error'))];
         }
-        return MessageResource::make($res->json());
+        return $res->json();
     }
 
     public function sendButtons(string $uid, string $token, string $to, string $message, array $buttons, array $options = []): array
@@ -373,7 +365,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
                 ->asJson()
                 ->post(config('uazapi.base_url') . '/group/updateImage', ['groupjid' => $groupId, 'image' => $options['photo']]);
         }
-        return CreateGroupResource::make($data);
+        return $data;
     }
 
     public function updateGroupName(string $uid, string $token, string $id, string $name): array

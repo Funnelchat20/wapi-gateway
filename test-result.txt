@@ -1,0 +1,31 @@
+Note: Unnecessary use of -X or --request, POST is already inferred.
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0* Host homolog-whatsmeow-alb-731186848.us-east-1.elb.amazonaws.com:80 was resolved.
+* IPv6: (none)
+* IPv4: 54.243.29.48, 3.218.123.6
+*   Trying 54.243.29.48:80...
+* Connected to homolog-whatsmeow-alb-731186848.us-east-1.elb.amazonaws.com (54.243.29.48) port 80
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0> POST /instances/integrator/on-demand HTTP/1.1
+> Host: homolog-whatsmeow-alb-731186848.us-east-1.elb.amazonaws.com
+> User-Agent: curl/8.7.1
+> Accept: */*
+> Authorization: Bearer iB4uIxOYOMFSnScXWlphBg==
+> Content-Type: application/json
+> Content-Length: 665
+> 
+} [665 bytes data]
+* upload completely sent off: 665 bytes
+< HTTP/1.1 201 Created
+< Date: Mon, 15 Dec 2025 15:18:06 GMT
+< Content-Type: application/json
+< Content-Length: 940
+< Connection: keep-alive
+< 
+{ [940 bytes data]
+100  1605  100   940  100   665   1824   1290 --:--:-- --:--:-- --:--:--  3116
+* Connection #0 to host homolog-whatsmeow-alb-731186848.us-east-1.elb.amazonaws.com left intact
+{"id":"eb77158b-0be7-409c-a742-72bc36ee4596","token":"620a2169-8438-4a78-8db4-a57eaa09d447","due":1765811886191,"instanceId":"eb77158b-0be7-409c-a742-72bc36ee4596","name":"U-1 D-999","sessionName":"Funnelchat","instanceToken":"620a2169-8438-4a78-8db4-a57eaa09d447","subscriptionActive":false,"callRejectAuto":false,"autoReadMessage":false,"middleware":"web","webhooks":{"receivedCallbackUrl":"http://localhost/webhooks/funapi/received?userId=1\u0026deviceId=999","receivedAndDeliveryCallbackUrl":"http://localhost/webhooks/funapi/received-and-delivery?userId=1\u0026deviceId=999","disconnectedCallbackUrl":"http://localhost/webhooks/funapi/disconnected?userId=1\u0026deviceId=999","connectedCallbackUrl":"http://localhost/webhooks/funapi/connected?userId=1\u0026deviceId=999","messageStatusCallbackUrl":"http://localhost/webhooks/funapi/message-status?userId=1\u0026deviceId=999","notifySentByMe":false},"createdAt":"2025-12-15T15:18:06Z"}
+
+
+HTTP Status: 201

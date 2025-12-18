@@ -1,6 +1,6 @@
 # WAPI Gateway (SDK)
 
-SDK puro para integrar proveedores de WhatsApp soportados por Funnelchat: ZApi, UAZAPI y Meta (WhatsApp Cloud), sin rutas ni middlewares. La app host consume métodos programáticos mediante un Facade y decide si expone endpoints propios.
+SDK puro para integrar proveedores de WhatsApp soportados por Funnelchat: ZApi, UAZAPI, Funapi (Whatsmeow Bridge) y Meta (WhatsApp Cloud), sin rutas ni middlewares. La app host consume métodos programáticos mediante un Facade y decide si expone endpoints propios.
 
 ## Requisitos
 - PHP ^8.2
@@ -44,6 +44,13 @@ php artisan vendor:publish --tag=wapi-config
   - `UAZAPI_BASE_URL` (ej.: `https://funnelchat.uazapi.com`)
   - `UAZAPI_ADMIN_TOKEN`
   - `UAZAPI_TIMEOUT` (default: `120`)
+- Funapi (Whatsmeow Bridge):
+  - `FUNAPI_BASE_URL` (requerida, ej.: `https://api.funapi.example.com`)
+  - `FUNAPI_TOKEN`
+  - `FUNAPI_CLIENT_TOKEN`
+  - `FUNAPI_TIMEOUT` (default: `29` segundos)
+  - `FUNAPI_MAX_ATTEMPTS` (default: `2` reintentos)
+  - `FUNAPI_RETRY_DELAY` (default: `500` ms entre reintentos)
 - Meta (WhatsApp Cloud):
   - `META_APP_ID` (para uploads de media en templates)
   - `AWS_BUCKET_URL` (si utilizas subida/descarga de archivos en flujos avanzados)
@@ -76,6 +83,16 @@ $response = WapiGateway::messages(ProviderEnum::Uazapi)
     ->sendText($uid, $token, $phone, 'Hola UAZAPI');
 ```
 
+Funapi (Whatsmeow Bridge):
+```php
+$response = WapiGateway::messages(ProviderEnum::Funapi)
+    ->sendText($uid, $token, $phone, 'Hola Funapi', [
+        'delayMessage' => 0,
+        'delayTyping' => 0,
+        'retry' => true,  // Habilita reintentos automáticos en errores de conexión
+    ]);
+```
+
 Meta (WhatsApp Cloud):
 ```php
 $response = WapiGateway::messages(ProviderEnum::WhatsAppCloud)
@@ -92,6 +109,12 @@ $data = WapiGateway::instances(ProviderEnum::ZApi)->create($userId, $deviceId);
 UAZAPI:
 ```php
 $data = WapiGateway::instances(ProviderEnum::Uazapi)->create($userId, $deviceId);
+```
+
+Funapi:
+```php
+$data = WapiGateway::instances(ProviderEnum::Funapi)->create($userId, $deviceId);
+// $data = ['uid' => '...', 'token' => '...'] o ['error' => '...']
 ```
 
 ### Eliminación concurrente de mensajes (v1.3.0+)
@@ -159,6 +182,7 @@ public function send(Request $request)
 ## Proveedores soportados
 - `ProviderEnum::ZApi`
 - `ProviderEnum::Uazapi`
+- `ProviderEnum::Funapi` (Whatsmeow Bridge)
 - `ProviderEnum::WhatsAppCloud`
 
 ## Changelog

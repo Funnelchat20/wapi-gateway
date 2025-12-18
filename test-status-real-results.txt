@@ -1,0 +1,164 @@
+═══════════════════════════════════════════════════════════════════════════
+RESULTADOS CON CREDENCIALES REALES - STATUS ENDPOINT
+═══════════════════════════════════════════════════════════════════════════
+Fecha: 2025-12-16 14:23 UTC
+Test: test-status-parity.php con credenciales de producción/homologación
+
+───────────────────────────────────────────────────────────────────────────
+✅ HALLAZGOS PRINCIPALES - MEJORAS SIGNIFICATIVAS
+───────────────────────────────────────────────────────────────────────────
+
+✅ ZAPI:
+   ✓ SÍ retorna 'accountStatus': "got qr code"
+   ✓ Obtiene QR automáticamente cuando no está conectado
+   ✓ Campo 'qrCode' presente con data:image/png base64
+   - Estado: connected=false, session=false
+   - Tiempo: ~411ms
+   ⚠️ Tiene campo 'error' junto con accountStatus (estado válido)
+
+✅ FUNAPI (Whatsmeow):
+   ✓ SÍ retorna 'accountStatus': "authenticated"
+   ✓ Mantiene comportamiento consistente
+   - Estado: connected=false, error="You need to restore the session"
+   - Tiempo: ~457ms
+   ⚠️ Dice "authenticated" pero tiene error de sesión
+
+✅ UAZAPI:
+   ✓ SÍ retorna 'accountStatus': "disconnected"
+   ✓ Estructura diferente pero completa
+   ✓ Provee objeto 'instance' con 26 campos detallados
+   ✓ Provee objeto 'status' con 3 campos
+   - Estado: disconnected, lastDisconnect con razón clara
+   - Tiempo: ~1041ms (más lento)
+   - Sin errores en la respuesta
+
+❌ META:
+   - No soportado (esperado)
+   - Tiempo: <1ms
+
+───────────────────────────────────────────────────────────────────────────
+📊 CONSISTENCIA DE CAMPOS - ACTUALIZADO
+───────────────────────────────────────────────────────────────────────────
+
+Campo              | ZApi  | Funapi | Uazapi      | Meta
+─────────────────────────────────────────────────────────────
+accountStatus      | ✅    | ✅     | ✅          | ❌
+connected          | ✅    | ✅     | (in status) | ❌
+smartphoneConnected| ✅    | ✅     | ❌          | ❌
+error              | ✅*   | ✅*    | ❌          | ✅
+qrCode             | ✅    | ❌     | (in inst.)  | ❌
+instance (objeto)  | ❌    | ❌     | ✅          | ❌
+status (objeto)    | ❌    | ❌     | ✅          | ❌
+
+* error presente pero no impide uso de accountStatus
+
+SCORE: 3/4 proveedores (75%) ✅ retornan 'accountStatus'
+MEJORA: De 25% a 75% con credenciales reales!
+
+───────────────────────────────────────────────────────────────────────────
+🎯 VALORES DE accountStatus ENCONTRADOS
+───────────────────────────────────────────────────────────────────────────
+
+ZApi:     "got qr code"     - Esperando conexión (con QR incluido)
+Funapi:   "authenticated"   - Autenticado (pero con error de sesión)
+Uazapi:   "disconnected"    - Desconectado explícitamente
+
+DIFERENCIAS:
+- ZApi usa "got qr code" cuando NO está conectado
+- Funapi usa "authenticated" (inconsistente con error)
+- Uazapi usa "disconnected" (más descriptivo)
+
+RECOMENDACIÓN:
+Normalizar valores a:
+  - "authenticated" - Conectado y funcionando
+  - "disconnected"  - Desconectado/sin sesión
+  - "got qr code"   - Esperando escaneo de QR
+  - "connecting"    - En proceso de conexión
+
+───────────────────────────────────────────────────────────────────────────
+🔍 ANÁLISIS POR PROVEEDOR
+───────────────────────────────────────────────────────────────────────────
+
+ZAPI - BUENA IMPLEMENTACIÓN:
+{
+  "connected": false,
+  "session": false,
+  "error": "You are not connected.",  // ← info, no error crítico
+  "smartphoneConnected": false,
+  "accountStatus": "got qr code",     // ← CORRECTO
+  "qrCode": "data:image/png;base64,..." // ← QR automático ✓
+}
+→ Comportamiento ideal: error + accountStatus + QR automático
+
+FUNAPI - NECESITA REVISIÓN:
+{
+  "connected": false,
+  "error": "You need to restore the session.",
+  "smartphoneConnected": false,
+  "accountStatus": "authenticated"    // ← INCONSISTENTE
+}
+→ BUG: No debería decir "authenticated" si hay error de sesión
+→ SUGERENCIA: accountStatus debería ser "disconnected" o "error"
+
+UAZAPI - ESTRUCTURA DIFERENTE:
+{
+  "instance": {
+    "status": "disconnected",
+    "lastDisconnectReason": "401: logged out from another device",
+    // ... 23 campos más
+  },
+  "status": {
+    "connected": false,
+    "jid": null,
+    "loggedIn": false
+  },
+  "accountStatus": "disconnected"     // ← CORRECTO
+}
+→ Más verboso pero muy completo
+→ accountStatus correctamente normalizado
+
+───────────────────────────────────────────────────────────────────────────
+⚠️ ISSUES ENCONTRADOS
+───────────────────────────────────────────────────────────────────────────
+
+1. FUNAPI - accountStatus="authenticated" con error de sesión
+   Prioridad: ALTA
+   Problema: Contradictorio - dice autenticado pero tiene error
+   Solución: Si hay error de sesión → accountStatus="disconnected"
+
+2. ZAPI - campo 'error' en estado válido
+   Prioridad: BAJA
+   Problema: "You are not connected" es info, no error
+   Solución: Está bien así, accountStatus aclara el estado
+
+3. UAZAPI - Timeout más alto (1041ms vs ~450ms otros)
+   Prioridad: MEDIA
+   Problema: Respuesta más lenta
+   Observación: Puede ser normal por estructura compleja
+
+───────────────────────────────────────────────────────────────────────────
+✅ PRÓXIMOS PASOS
+───────────────────────────────────────────────────────────────────────────
+
+1. ✅ COMPLETADO: Test de status con credenciales reales
+2. 🔧 PENDIENTE: Corregir Funapi accountStatus cuando hay error
+3. 🧪 PENDIENTE: Test con instancias en diferentes estados:
+   - Autenticada y funcionando
+   - Esperando QR
+   - Desconectada
+   - Error de subscripción
+4. 🧪 PENDIENTE: Tests de otros endpoints (qrCode, sendText, etc.)
+
+───────────────────────────────────────────────────────────────────────────
+📝 CONCLUSIÓN
+───────────────────────────────────────────────────────────────────────────
+
+✅ ÉXITO: 75% de proveedores retornan accountStatus consistentemente
+✅ MEJORA: De 25% (test inicial) a 75% (con credenciales)
+⚠️ ISSUE: Funapi reporta "authenticated" incorrectamente
+✅ ZAPI: Implementación ejemplar (error + status + QR automático)
+✅ UAZAPI: Muy completo, diferente estructura pero funcional
+
+VEREDICTO: SDK casi listo, solo necesita fix en Funapi
+
+═══════════════════════════════════════════════════════════════════════════
