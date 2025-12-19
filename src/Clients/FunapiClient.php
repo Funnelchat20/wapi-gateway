@@ -186,10 +186,9 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function checkPhone(string $uid, string $token, string $phone): array
     {
-        $url = $this->buildUrl($uid, $token, 'phone-exists/' . $phone);
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
-        if ($res->failed()) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return CheckPhoneResource::make($res->json());
+        // Funapi does not provide a phone-exists endpoint
+        // The phone-code endpoint is for pairing, not for checking if a phone has WhatsApp
+        return ['error' => 'checkPhone() is not supported by Funapi provider'];
     }
 
     public function subscribe(string $uid, string $token): array
@@ -204,7 +203,7 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
     public function unsubscribe(string $uid, string $token): array
     {
         $instanceUid = explode('-', $uid)[0] ?? $uid;
-        $disconnectUrl = str_replace(['UID', 'TOKEN', 'ACTION'], [$instanceUid, $token, 'disconnect'], self::BASE);
+        $disconnectUrl = $this->buildUrl($instanceUid, $token, 'disconnect');
         $disc = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($disconnectUrl);
         if ($disc->failed() || $disc->json('error')) return ['error' => $disc->json('error') ?? 'disconnect_failed'];
         $url = str_replace(['UID', 'TOKEN'], [$instanceUid, $token], config('funapi.unsubscription_url'));
@@ -227,7 +226,7 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $action = $this->mapAction($ext);
         if ($action === 'invalid') return ['error' => 'Invalid file extension'];
-        if ($action === 'send-document') $action = $action . '/' . $ext;
+        // Funapi uses endpoints WITHOUT file type suffix: /send-image, /send-document (not /send-document/pdf)
         $attr = $this->mapAttr($ext);
         $params = ['phone' => $to, $attr => $fileUrl];
         if (isset($options['fileName'])) $params['fileName'] = $options['fileName'];
@@ -245,7 +244,7 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
             $params['async'] = (bool) $options['async'];
         }
 
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, $action], self::BASE);
+        $url = $this->buildUrl($uid, $token, $action);
 
         $request = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
             ->timeout(config('funapi.timeout', 120));
@@ -307,126 +306,37 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function sendButtons(string $uid, string $token, string $to, string $message, array $buttons, array $options = []): array
     {
-        $params = ['phone' => $to, 'message' => $message, 'buttonList' => ['buttons' => $buttons]];
-        if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
-        $url = $this->buildUrl($uid, $token, 'send-button-list');
-
-        $request = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
-            ->timeout(config('funapi.timeout', 120));
-
-        // Apply retry logic if enabled in options
-        if ($options['retry'] ?? false) {
-            $request = $request->retry(
-                config('funapi.max_attempts', 2),
-                config('funapi.retry_delay', 500),
-                function ($exception, $request) {
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
-                        str_contains($exception->getMessage(), 'cURL error 28')) {
-                        return false;
-                    }
-                    return $exception instanceof ConnectionException;
-                },
-                false
-            );
-        }
-
-        $res = $request->post($url, $params);
-        if ($res->failed() || $res->json('error')) {
-            return ['error' => $this->formatError($res->json('error', 'error'))];
-        }
-        return $res->json();
+        return ['error' => 'sendButtons() is not yet available for Funapi provider. Development in progress.'];
     }
 
     public function sendButtonLink(string $uid, string $token, string $to, string $message, string $url, string $label, array $options = []): array
     {
-        $params = ['phone' => $to, 'message' => $message, 'buttonActions' => [['type' => 'URL', 'url' => $url, 'label' => $label]]];
-        if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
-        $url = $this->buildUrl($uid, $token, 'send-button-actions');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(120)->post($url, $params);
-        if ($res->failed() || $res->json('error')) {
-            return ['error' => $this->formatError($res->json('error', 'error'))];
-        }
-        return $res->json();
+        return ['error' => 'sendButtonLink() is not yet available for Funapi provider. Development in progress.'];
     }
 
     public function sendOptionList(string $uid, string $token, string $to, string $message, string $buttonLabel, array $optionsList, array $extra = []): array
     {
-        $params = ['phone' => $to, 'message' => $message, 'optionList' => ['options' => $optionsList, 'buttonLabel' => $buttonLabel]];
-        if (isset($extra['delayMessage'])) $params['delayMessage'] = (int) $extra['delayMessage'];
-        $url = $this->buildUrl($uid, $token, 'send-option-list');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(120)->post($url, $params);
-        if ($res->failed() || $res->json('error')) {
-            return ['error' => $this->formatError($res->json('error', 'error'))];
-        }
-        return $res->json();
+        return ['error' => 'sendOptionList() is not yet available for Funapi provider. Development in progress.'];
     }
 
     public function sendPoll(string $uid, string $token, string $to, string $message, array $pollOptions, array $options = []): array
     {
-        $params = ['phone' => $to, 'message' => $message, 'poll' => array_map(fn($o) => ['name' => $o], $pollOptions)];
-        if (isset($options['pollMaxOptions'])) $params['pollMaxOptions'] = (int) $options['pollMaxOptions'];
-        if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
-        $url = $this->buildUrl($uid, $token, 'send-poll');
-
-        $request = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
-            ->timeout(config('funapi.timeout', 120));
-
-        // Apply retry logic if enabled in options
-        if ($options['retry'] ?? false) {
-            $request = $request->retry(
-                config('funapi.max_attempts', 2),
-                config('funapi.retry_delay', 500),
-                function ($exception, $request) {
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
-                        str_contains($exception->getMessage(), 'cURL error 28')) {
-                        return false;
-                    }
-                    return $exception instanceof ConnectionException;
-                },
-                false
-            );
-        }
-
-        $res = $request->post($url, $params);
-        if ($res->failed() || $res->json('error')) {
-            return ['error' => $this->formatError($res->json('error', 'error'))];
-        }
-        return $res->json();
+        return ['error' => 'sendPoll() is not yet available for Funapi provider. Development in progress.'];
     }
 
     public function sendLink(string $uid, string $token, string $to, string $message, string $linkUrl, array $options = []): array
     {
-        $params = ['phone' => $to, 'message' => $message, 'linkUrl' => $linkUrl];
-        if (isset($options['title'])) $params['title'] = $options['title'];
-        if (isset($options['linkDescription'])) $params['linkDescription'] = $options['linkDescription'];
-        if (isset($options['image'])) $params['image'] = $options['image'];
-        if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
-        if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
-        if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
-        $url = $this->buildUrl($uid, $token, 'send-link');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(120)->post($url, $params);
-        if ($res->failed() || $res->json('error')) {
-            return ['error' => $this->formatError($res->json('error', 'error'))];
-        }
-        return $res->json();
+        return ['error' => 'sendLink() is not yet available for Funapi provider. Development in progress.'];
     }
 
     public function sendEvent(string $uid, string $token, string $toGroupPhone, array $event, array $options = []): array
     {
-        $params = ['phone' => $toGroupPhone, 'event' => $event];
-        $url = $this->buildUrl($uid, $token, 'send-event');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(60)->post($url, $params);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return $res->json();
+        return ['error' => 'sendEvent() is not yet available for Funapi provider. Development in progress.'];
     }
 
     public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
     {
-        $url = $this->buildUrl($uid, $token, 'send-message');
-        $payload = ['phone' => $to, 'message' => '[TEMPLATE] ' . $name];
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(60)->post($url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return $res->json();
+        return ['error' => 'sendTemplate() is not yet available for Funapi provider. Development in progress.'];
     }
 
     private function mapAction(string $ext): string
@@ -473,10 +383,10 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function group(string $uid, string $token, string $id): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'group-metadata/' . $id . '-group'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'group-metadata/' . $id . '-group');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
         if ($res->failed() || $res->json('error') || $res->json('success') === false) return ['error' => $this->formatError($res->json('error', $res->json('message', 'error')))];
-        $image = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get(str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'chats/' . $id . '-group'], self::BASE))->json('profileThumbnail', '');
+        $image = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($this->buildUrl($uid, $token, 'chats/' . $id . '-group'))->json('profileThumbnail', '');
         $data = $res->json();
         $data['image'] = $image;
         return GroupResource::make($data);
