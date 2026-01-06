@@ -89,20 +89,26 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         
         $qrCode = '';
 
-        // If not connected, MAKE SECOND API CALL to get QR code automatically (like ZApi)
+        // If not connected, try to extract QR code from status response first
         if ($instanceStatus !== self::CONNECTED) {
-            $qrUrl = config('uazapi.base_url') . config('uazapi.endpoints.qr_code');
-            $qrRes = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->post($qrUrl);
-            
-            if (!$qrRes->failed()) {
-                $qrData = $qrRes->json();
-                
-                // Extract qrcode from response (it's in instance.qrcode)
-                $qrcode = $qrData['instance']['qrcode'] ?? $qrData['qrcode'] ?? null;
-                
-                if (!empty($qrcode)) {
-                    $qrCode = $qrcode;
+            // First, check if the status response already contains the QR code
+            $qrcode = $data['instance']['qrcode'] ?? $data['qrcode'] ?? null;
+
+            // If no QR code in status response, MAKE SECOND API CALL with raw body
+            if (empty($qrcode)) {
+                $qrUrl = config('uazapi.base_url') . config('uazapi.endpoints.qr_code');
+                $qrRes = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->withBody('{}', 'application/json')->post($qrUrl);
+
+                if (!$qrRes->failed()) {
+                    $qrData = $qrRes->json();
+
+                    // Extract qrcode from response (it's in instance.qrcode)
+                    $qrcode = $qrData['instance']['qrcode'] ?? $qrData['qrcode'] ?? null;
                 }
+            }
+
+            if (!empty($qrcode)) {
+                $qrCode = $qrcode;
             }
         }
 
@@ -116,7 +122,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
     public function qrCode(string $uid, string $token): array
     {
         $url = config('uazapi.base_url') . config('uazapi.endpoints.qr_code');
-        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->post($url);
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->withBody('{}', 'application/json')->post($url);
         if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
         $data = $res->json();
         return ['qrcode' => $data['instance']['qrcode'] ?? $data['qrcode'] ?? null, 'paircode' => $data['instance']['paircode'] ?? $data['paircode'] ?? null];
