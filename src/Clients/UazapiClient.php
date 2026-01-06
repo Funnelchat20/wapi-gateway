@@ -89,26 +89,16 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         
         $qrCode = '';
 
-        // If not connected, get QR code (from cache, status response, or API call)
+        // If not connected, generate FRESH QR code (don't trust status response QR as it may be expired)
         if ($instanceStatus !== self::CONNECTED) {
             $cacheKey = "uazapi:qrcode:{$uid}";
 
-            // Try to get from cache first (TTL: 4 minutes)
+            // Try to get from cache first (TTL: 30 seconds - WhatsApp QR expires quickly)
             if (function_exists('cache')) {
                 $qrcode = cache()->get($cacheKey);
             }
 
-            // If not in cache, check if the status response already contains the QR code
-            if (empty($qrcode)) {
-                $qrcode = $data['instance']['qrcode'] ?? $data['qrcode'] ?? null;
-
-                // If QR comes from status response, cache it
-                if (!empty($qrcode) && function_exists('cache')) {
-                    cache()->put($cacheKey, $qrcode, now()->addMinutes(4));
-                }
-            }
-
-            // If still no QR code, make API call to generate new one
+            // If not in cache, ALWAYS generate a NEW QR code via API (don't use status QR - it's often expired)
             if (empty($qrcode)) {
                 $qrUrl = config('uazapi.base_url') . config('uazapi.endpoints.qr_code');
                 $qrRes = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->withBody('{}', 'application/json')->post($qrUrl);
@@ -119,9 +109,9 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
                     // Extract qrcode from response (it's in instance.qrcode)
                     $qrcode = $qrData['instance']['qrcode'] ?? $qrData['qrcode'] ?? null;
 
-                    // Cache the QR code for 4 minutes (WhatsApp QR codes typically expire after 5 minutes)
+                    // Cache the FRESH QR code for 30 seconds only (WhatsApp QR codes expire quickly)
                     if (!empty($qrcode) && function_exists('cache')) {
-                        cache()->put($cacheKey, $qrcode, now()->addMinutes(4));
+                        cache()->put($cacheKey, $qrcode, now()->addSeconds(30));
                     }
                 }
             }
