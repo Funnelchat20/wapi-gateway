@@ -89,35 +89,39 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         
         $qrCode = '';
 
-        // If not connected, try to extract QR code from status response first
+        // If not connected, get QR code (from cache, status response, or API call)
         if ($instanceStatus !== self::CONNECTED) {
-            // First, check if the status response already contains the QR code
-            $qrcode = $data['instance']['qrcode'] ?? $data['qrcode'] ?? null;
+            $cacheKey = "uazapi:qrcode:{$uid}";
 
-            // If no QR code in status response, try cache first before making API call
+            // Try to get from cache first (TTL: 4 minutes)
+            if (function_exists('cache')) {
+                $qrcode = cache()->get($cacheKey);
+            }
+
+            // If not in cache, check if the status response already contains the QR code
             if (empty($qrcode)) {
-                $cacheKey = "uazapi:qrcode:{$uid}";
+                $qrcode = $data['instance']['qrcode'] ?? $data['qrcode'] ?? null;
 
-                // Try to get from cache (TTL: 4 minutes)
-                if (function_exists('cache')) {
-                    $qrcode = cache()->get($cacheKey);
+                // If QR comes from status response, cache it
+                if (!empty($qrcode) && function_exists('cache')) {
+                    cache()->put($cacheKey, $qrcode, now()->addMinutes(4));
                 }
+            }
 
-                // If not in cache, make API call to generate new QR code
-                if (empty($qrcode)) {
-                    $qrUrl = config('uazapi.base_url') . config('uazapi.endpoints.qr_code');
-                    $qrRes = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->withBody('{}', 'application/json')->post($qrUrl);
+            // If still no QR code, make API call to generate new one
+            if (empty($qrcode)) {
+                $qrUrl = config('uazapi.base_url') . config('uazapi.endpoints.qr_code');
+                $qrRes = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->withBody('{}', 'application/json')->post($qrUrl);
 
-                    if (!$qrRes->failed()) {
-                        $qrData = $qrRes->json();
+                if (!$qrRes->failed()) {
+                    $qrData = $qrRes->json();
 
-                        // Extract qrcode from response (it's in instance.qrcode)
-                        $qrcode = $qrData['instance']['qrcode'] ?? $qrData['qrcode'] ?? null;
+                    // Extract qrcode from response (it's in instance.qrcode)
+                    $qrcode = $qrData['instance']['qrcode'] ?? $qrData['qrcode'] ?? null;
 
-                        // Cache the QR code for 4 minutes (WhatsApp QR codes typically expire after 5 minutes)
-                        if (!empty($qrcode) && function_exists('cache')) {
-                            cache()->put($cacheKey, $qrcode, now()->addMinutes(4));
-                        }
+                    // Cache the QR code for 4 minutes (WhatsApp QR codes typically expire after 5 minutes)
+                    if (!empty($qrcode) && function_exists('cache')) {
+                        cache()->put($cacheKey, $qrcode, now()->addMinutes(4));
                     }
                 }
             }
