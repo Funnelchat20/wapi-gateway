@@ -93,45 +93,63 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         if ($instanceStatus !== self::CONNECTED) {
             $cacheKey = "uazapi:qrcode:{$uid}";
             $connectTriggeredKey = "uazapi:connect_triggered:{$uid}";
+            $connectLockKey = "uazapi:connect_lock:{$uid}";
 
-            // Try to get from cache first (TTL: 30 seconds - WhatsApp QR expires in 2 minutes per spec)
+            // Try to get from cache first
             if (function_exists('cache')) {
                 $qrcode = cache()->get($cacheKey);
             }
 
-            // If not in cache or connect hasn't been triggered, call /instance/connect FIRST
+            // If not in cache, we need to generate a new QR
             if (empty($qrcode)) {
-                // Check if we need to trigger /instance/connect (only if not recently triggered)
-                $needsConnect = function_exists('cache') ? !cache()->has($connectTriggeredKey) : true;
+                // Check if connect process is already ongoing or recently triggered
+                // We use a longer TTL (90 seconds) to avoid interrupting an active QR scan
+                $connectInProgress = function_exists('cache') ? cache()->has($connectTriggeredKey) : false;
                 
-                if ($needsConnect) {
-                    // STEP 1: Call /instance/connect to initiate the connection process
-                    $connectUrl = config('uazapi.base_url') . config('uazapi.endpoints.connect');
-                    $connectRes = Http::withHeaders(['token' => $token])
-                        ->timeout(config('uazapi.timeout', 30))
-                        ->withBody('{}', 'application/json')
-                        ->post($connectUrl);
+                // Only trigger /instance/connect if NOT already in progress AND instance is truly disconnected
+                if (!$connectInProgress && $instanceStatus === self::DISCONNECTED) {
+                    // Use atomic lock to prevent race conditions from multiple concurrent requests
+                    $lock = function_exists('cache') ? cache()->lock($connectLockKey, 5) : null;
+                    
+                    if ($lock && $lock->get()) {
+                        try {
+                            // STEP 1: Call /instance/connect to initiate the connection process
+                            $connectUrl = config('uazapi.base_url') . config('uazapi.endpoints.connect');
+                            $connectRes = Http::withHeaders(['token' => $token])
+                                ->timeout(config('uazapi.timeout', 30))
+                                ->withBody('{}', 'application/json')
+                                ->post($connectUrl);
 
-                    // Mark that we triggered connect (TTL: 30 seconds)
-                    if (function_exists('cache')) {
-                        cache()->put($connectTriggeredKey, true, now()->addSeconds(30));
+                            // Mark that we triggered connect (TTL: 90 seconds - enough time for user to scan)
+                            // This prevents multiple /instance/connect calls while user is trying to scan
+                            if (function_exists('cache')) {
+                                cache()->put($connectTriggeredKey, true, now()->addSeconds(90));
+                            }
+                        } finally {
+                            optional($lock)->release();
+                        }
                     }
                 }
 
-                // STEP 2: Now get the QR code from /instance/status (it should be fresh now)
-                $statusRes = Http::withHeaders(['token' => $token])
-                    ->timeout(config('uazapi.timeout', 30))
-                    ->get($url);
+                // STEP 2: Get the QR code from current status or from fresh /instance/status call
+                // First try to use the QR from the initial status call (avoids extra API call)
+                $qrcode = $data['instance']['qrcode'] ?? null;
+                
+                // If no QR in initial response and we're in connecting state, fetch fresh status
+                if (empty($qrcode) && $instanceStatus === self::CONNECTING) {
+                    $statusRes = Http::withHeaders(['token' => $token])
+                        ->timeout(config('uazapi.timeout', 30))
+                        ->get($url);
 
-                if (!$statusRes->failed()) {
-                    $statusData = $statusRes->json();
-                    // Extract qrcode from status response
-                    $qrcode = $statusData['instance']['qrcode'] ?? null;
-
-                    // Cache the FRESH QR code for 30 seconds (QR expires in 2 minutes per spec)
-                    if (!empty($qrcode) && function_exists('cache')) {
-                        cache()->put($cacheKey, $qrcode, now()->addSeconds(30));
+                    if (!$statusRes->failed()) {
+                        $statusData = $statusRes->json();
+                        $qrcode = $statusData['instance']['qrcode'] ?? null;
                     }
+                }
+
+                // Cache the QR code for 25 seconds (shorter than connect trigger to force refresh)
+                if (!empty($qrcode) && function_exists('cache')) {
+                    cache()->put($cacheKey, $qrcode, now()->addSeconds(25));
                 }
             }
 
@@ -139,12 +157,14 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
                 $qrCode = $qrcode;
             }
         } else {
-            // If connected, clear any cached QR code and connect trigger
+            // If connected, clear all cached data
             $cacheKey = "uazapi:qrcode:{$uid}";
             $connectTriggeredKey = "uazapi:connect_triggered:{$uid}";
+            $connectLockKey = "uazapi:connect_lock:{$uid}";
             if (function_exists('cache')) {
                 cache()->forget($cacheKey);
                 cache()->forget($connectTriggeredKey);
+                cache()->forget($connectLockKey);
             }
         }
 
