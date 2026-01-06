@@ -89,27 +89,46 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         
         $qrCode = '';
 
-        // If not connected, generate FRESH QR code (don't trust status response QR as it may be expired)
+        // If not connected, we need to initiate connection process to get a valid QR code
         if ($instanceStatus !== self::CONNECTED) {
             $cacheKey = "uazapi:qrcode:{$uid}";
+            $connectTriggeredKey = "uazapi:connect_triggered:{$uid}";
 
-            // Try to get from cache first (TTL: 30 seconds - WhatsApp QR expires quickly)
+            // Try to get from cache first (TTL: 30 seconds - WhatsApp QR expires in 2 minutes per spec)
             if (function_exists('cache')) {
                 $qrcode = cache()->get($cacheKey);
             }
 
-            // If not in cache, ALWAYS generate a NEW QR code via API (don't use status QR - it's often expired)
+            // If not in cache or connect hasn't been triggered, call /instance/connect FIRST
             if (empty($qrcode)) {
-                $qrUrl = config('uazapi.base_url') . config('uazapi.endpoints.qr_code');
-                $qrRes = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->withBody('{}', 'application/json')->post($qrUrl);
+                // Check if we need to trigger /instance/connect (only if not recently triggered)
+                $needsConnect = function_exists('cache') ? !cache()->has($connectTriggeredKey) : true;
+                
+                if ($needsConnect) {
+                    // STEP 1: Call /instance/connect to initiate the connection process
+                    $connectUrl = config('uazapi.base_url') . config('uazapi.endpoints.connect');
+                    $connectRes = Http::withHeaders(['token' => $token])
+                        ->timeout(config('uazapi.timeout', 30))
+                        ->withBody('{}', 'application/json')
+                        ->post($connectUrl);
 
-                if (!$qrRes->failed()) {
-                    $qrData = $qrRes->json();
+                    // Mark that we triggered connect (TTL: 30 seconds)
+                    if (function_exists('cache')) {
+                        cache()->put($connectTriggeredKey, true, now()->addSeconds(30));
+                    }
+                }
 
-                    // Extract qrcode from response (it's in instance.qrcode)
-                    $qrcode = $qrData['instance']['qrcode'] ?? $qrData['qrcode'] ?? null;
+                // STEP 2: Now get the QR code from /instance/status (it should be fresh now)
+                $statusRes = Http::withHeaders(['token' => $token])
+                    ->timeout(config('uazapi.timeout', 30))
+                    ->get($url);
 
-                    // Cache the FRESH QR code for 30 seconds only (WhatsApp QR codes expire quickly)
+                if (!$statusRes->failed()) {
+                    $statusData = $statusRes->json();
+                    // Extract qrcode from status response
+                    $qrcode = $statusData['instance']['qrcode'] ?? null;
+
+                    // Cache the FRESH QR code for 30 seconds (QR expires in 2 minutes per spec)
                     if (!empty($qrcode) && function_exists('cache')) {
                         cache()->put($cacheKey, $qrcode, now()->addSeconds(30));
                     }
@@ -120,10 +139,12 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
                 $qrCode = $qrcode;
             }
         } else {
-            // If connected, clear any cached QR code
+            // If connected, clear any cached QR code and connect trigger
             $cacheKey = "uazapi:qrcode:{$uid}";
+            $connectTriggeredKey = "uazapi:connect_triggered:{$uid}";
             if (function_exists('cache')) {
                 cache()->forget($cacheKey);
+                cache()->forget($connectTriggeredKey);
             }
         }
 
