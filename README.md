@@ -27,6 +27,12 @@ php artisan vendor:publish --tag=wapi-config
 
 ### Variables de entorno por proveedor
 
+#### Global (Todos los proveedores)
+```env
+# URL base para webhooks (requerida para recibir notificaciones)
+WEBHOOK_BASE_URL=https://tu-app.com
+```
+
 #### Z-API
 ```env
 ZAPI_TOKEN=tu_token_aqui
@@ -41,6 +47,9 @@ ZAPI_RETRY_DELAY=500
 UAZAPI_BASE_URL=https://funnelchat.uazapi.com
 UAZAPI_ADMIN_TOKEN=tu_admin_token
 UAZAPI_TIMEOUT=120
+
+# Opcional: deshabilitar configuración automática de webhooks
+UAZAPI_AUTO_CONFIGURE_WEBHOOKS=true
 ```
 
 #### Funapi (Whatsmeow Bridge)
@@ -240,6 +249,79 @@ $response = WapiGateway::messages(ProviderEnum::ZApi)
 // - Configurable vía ZAPI_MAX_ATTEMPTS y ZAPI_RETRY_DELAY
 ```
 
+## Configuración Automática de Webhooks
+
+El SDK configura webhooks automáticamente al crear instancias para recibir notificaciones en tiempo real de mensajes, conexión/desconexión, y otros eventos.
+
+### ⚙️ Configuración
+
+**Variable requerida:**
+```env
+WEBHOOK_BASE_URL=https://tu-app.com
+```
+
+Si no defines `WEBHOOK_BASE_URL`, el SDK usará `APP_URL` como fallback. Si ninguna está configurada, no se configurarán webhooks automáticamente.
+
+### 📡 Webhooks por Proveedor
+
+#### Z-API
+Configurados en el payload de creación de instancia:
+- `/webhooks/zapi/received` - Mensajes recibidos
+- `/webhooks/zapi/received-and-delivery` - Mensajes y confirmaciones de entrega
+- `/webhooks/zapi/disconnected` - Instancia desconectada
+- `/webhooks/zapi/connected` - Instancia conectada
+- `/webhooks/zapi/message-status` - Estados de mensajes enviados
+- `/webhooks/zapi/block` - Bloqueos/desbloqueos
+
+#### UAZAPI
+Configurados vía POST `/webhook` después de crear la instancia:
+- `/webhooks/uazapi/messages` - Mensajes recibidos
+- `/webhooks/uazapi/messages_update` - Actualizaciones de mensajes
+- `/webhooks/uazapi/connection` - Cambios de conexión
+- `/webhooks/uazapi/messages` - Eventos de grupos (comparte ruta con messages)
+
+**Opciones:**
+```env
+# Deshabilitar webhooks automáticos para UAZAPI
+UAZAPI_AUTO_CONFIGURE_WEBHOOKS=false
+```
+
+#### Funapi
+Configurados en el payload de creación de instancia:
+- `/webhooks/funapi/received` - Mensajes recibidos
+- `/webhooks/funapi/received-and-delivery` - Mensajes y confirmaciones de entrega
+- `/webhooks/funapi/disconnected` - Instancia desconectada
+- `/webhooks/funapi/connected` - Instancia conectada
+- `/webhooks/funapi/message-status` - Estados de mensajes enviados
+- `/webhooks/funapi/block` - Bloqueos/desbloqueos
+
+### 💡 Ejemplo de Uso
+
+```php
+// 1. Configurar .env
+// WEBHOOK_BASE_URL=https://mi-app.com
+
+// 2. Crear instancia (webhooks se configuran automáticamente)
+$instance = WapiGateway::instances(ProviderEnum::Uazapi)->create($userId, $deviceId);
+// Los webhooks ya están configurados en UAZAPI
+
+// 3. La app host debe tener rutas para recibir webhooks
+Route::post('/webhooks/uazapi/messages', [WebhookController::class, 'uazapiMessages']);
+Route::post('/webhooks/uazapi/connection', [WebhookController::class, 'uazapiConnection']);
+// etc...
+```
+
+### 🔍 Logging
+
+El SDK registra automáticamente el éxito/error de la configuración de webhooks:
+
+```php
+// Logs en UAZAPI
+Log::info('UAZAPI webhook configured successfully', [...]);
+Log::warning('UAZAPI webhook configuration failed', [...]);
+Log::warning('UAZAPI webhook configuration skipped: WEBHOOK_BASE_URL not configured', [...]);
+```
+
 ## Sistema de Resources
 
 El SDK transforma las respuestas de cada proveedor para mantener compatibilidad con WAPI original:
@@ -336,7 +418,19 @@ class WhatsAppController extends Controller
 
 ## Changelog
 
-### v0.1.0 - 2025-01-XX (En desarrollo)
+### v0.2.0 - 2025-01-XX (En desarrollo)
+
+**Added:**
+- ✨ Configuración automática de webhooks al crear instancias
+- ✨ Variable de entorno `WEBHOOK_BASE_URL` para configuración centralizada
+- ✨ Método privado `configureWebhooks()` en UazapiClient con logging completo
+- ✨ Soporte para deshabilitar webhooks con `UAZAPI_AUTO_CONFIGURE_WEBHOOKS=false`
+
+**Changed:**
+- 🔧 ZApiClient, UazapiClient y FunapiClient ahora usan `WEBHOOK_BASE_URL` en lugar de `APP_URL`
+- 🔧 Webhooks solo se configuran si `WEBHOOK_BASE_URL` está definida
+
+### v0.1.0 - 2025-01-07
 
 **Added:**
 - ✨ Sistema completo de Resources para transformación de respuestas

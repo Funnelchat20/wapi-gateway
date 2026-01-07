@@ -4,6 +4,10 @@ return [
     'base_url' => env('UAZAPI_BASE_URL', 'https://funnelchat.uazapi.com'),
     'admin_token' => env('UAZAPI_ADMIN_TOKEN'),
     'timeout' => env('UAZAPI_TIMEOUT', 120),
+
+    // Webhook configuration
+    'webhook_base_url' => env('WEBHOOK_BASE_URL', env('APP_URL')),
+    'auto_configure_webhooks' => env('UAZAPI_AUTO_CONFIGURE_WEBHOOKS', true),
     'endpoints' => [
         'qr_code' => '/instance/connect',
         'status' => '/instance/status',

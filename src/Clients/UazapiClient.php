@@ -46,13 +46,27 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         $base = config('uazapi.base_url');
         $timeout = config('uazapi.timeout', 120);
         $name = 'U-' . $userId . ' D-' . $deviceId;
-        $res = Http::withHeaders(['admintoken' => config('uazapi.admin_token')])->timeout($timeout)->post($base . '/instance/init', ['name' => $name]);
+
+        // 1. Create instance
+        $res = Http::withHeaders(['admintoken' => config('uazapi.admin_token')])
+            ->timeout($timeout)
+            ->post($base . '/instance/init', ['name' => $name]);
+
         if ($res->failed()) {
             return ['error' => $res->json('error', 'Failed to create instance')];
         }
+
+        $instanceId = $res->json('instance.id');
+        $token = $res->json('instance.token');
+
+        // 2. Configure webhooks automatically (if enabled)
+        if (config('uazapi.auto_configure_webhooks', true) && $token) {
+            $this->configureWebhooks($token, $userId, $deviceId);
+        }
+
         return [
-            'uid' => $res->json('instance.id'),
-            'token' => $res->json('instance.token')
+            'uid' => $instanceId,
+            'token' => $token
         ];
     }
 
@@ -680,5 +694,73 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
     public function clearQueue(string $uid, string $token): array
     {
         return ['success' => true];
+    }
+
+    /**
+     * Configure webhooks automatically after instance creation
+     * Matches WAPI original behavior
+     */
+    private function configureWebhooks(string $token, int $userId, int $deviceId): void
+    {
+        $webhookBaseUrl = config('uazapi.webhook_base_url');
+        $uazapiBaseUrl = config('uazapi.base_url');
+        $timeout = config('uazapi.timeout', 120);
+
+        if (!$webhookBaseUrl) {
+            \Log::warning('UAZAPI webhook configuration skipped: WEBHOOK_BASE_URL not configured', [
+                'userId' => $userId,
+                'deviceId' => $deviceId,
+            ]);
+            return;
+        }
+
+        $webhookEvents = [
+            ['event' => 'messages', 'route' => 'messages'],
+            ['event' => 'messages_update', 'route' => 'messages_update'],
+            ['event' => 'connection', 'route' => 'connection'],
+            ['event' => 'groups', 'route' => 'messages'], // Group events go to messages route
+        ];
+
+        foreach ($webhookEvents as $config) {
+            $webhookUrl = $webhookBaseUrl . '/webhooks/uazapi/' . $config['route']
+                        . '?userId=' . $userId . '&deviceId=' . $deviceId;
+
+            try {
+                $response = Http::withHeaders(['token' => $token])
+                    ->timeout($timeout)
+                    ->post($uazapiBaseUrl . '/webhook', [
+                        'action' => 'add',
+                        'enabled' => true,
+                        'url' => $webhookUrl,
+                        'events' => [$config['event']],
+                        'excludeMessages' => ['wasSentByApi'],
+                    ]);
+
+                if ($response->failed() || $response->json('error')) {
+                    \Log::warning('UAZAPI webhook configuration failed', [
+                        'userId' => $userId,
+                        'deviceId' => $deviceId,
+                        'event' => $config['event'],
+                        'webhookUrl' => $webhookUrl,
+                        'error' => $response->json('error', 'Unknown error'),
+                        'status' => $response->status(),
+                    ]);
+                } else {
+                    \Log::info('UAZAPI webhook configured successfully', [
+                        'userId' => $userId,
+                        'deviceId' => $deviceId,
+                        'event' => $config['event'],
+                        'webhookUrl' => $webhookUrl,
+                    ]);
+                }
+            } catch (\Exception $e) {
+                \Log::error('UAZAPI webhook configuration exception', [
+                    'userId' => $userId,
+                    'deviceId' => $deviceId,
+                    'event' => $config['event'],
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
     }
 }

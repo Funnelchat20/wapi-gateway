@@ -8,6 +8,9 @@ return [
     'unsubscription_url' => 'https://api.z-api.io/instances/UID/token/TOKEN/integrator/on-demand/cancel',
     'on_demand_url' => 'https://api.z-api.io/instances/integrator/on-demand',
 
+    // Webhook configuration
+    'webhook_base_url' => env('WEBHOOK_BASE_URL', env('APP_URL')),
+
     /*
     |--------------------------------------------------------------------------
     | HTTP Request Configuration

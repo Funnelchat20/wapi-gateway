@@ -80,20 +80,29 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
     public function create(int $userId, int $deviceId): array
     {
         $name = 'U-' . $userId . ' D-' . $deviceId;
-        $baseUrl = config('app.url');
-        $res = Http::withToken(config('funapi.token'))->post(config('funapi.on_demand_url'), [
+        $webhookBaseUrl = config('funapi.webhook_base_url');
+
+        $payload = [
             'name' => $name,
             'sessionName' => 'Funnelchat',
-            'receivedCallbackUrl' => $baseUrl . '/webhooks/funapi/received?userId=' . $userId . '&deviceId=' . $deviceId,
-            'receivedAndDeliveryCallbackUrl' => $baseUrl . '/webhooks/funapi/received-and-delivery?userId=' . $userId . '&deviceId=' . $deviceId,
-            'disconnectedCallbackUrl' => $baseUrl . '/webhooks/funapi/disconnected?userId=' . $userId . '&deviceId=' . $deviceId,
-            'connectedCallbackUrl' => $baseUrl . '/webhooks/funapi/connected?userId=' . $userId . '&deviceId=' . $deviceId,
-            'messageStatusCallbackUrl' => $baseUrl . '/webhooks/funapi/message-status?userId=' . $userId . '&deviceId=' . $deviceId,
-            'blockCallbackUrl' => $baseUrl . '/webhooks/funapi/block?userId=' . $userId . '&deviceId=' . $deviceId,
-        ]);
+        ];
+
+        // Only configure webhooks if WEBHOOK_BASE_URL is set
+        if ($webhookBaseUrl) {
+            $payload['receivedCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/received?userId=' . $userId . '&deviceId=' . $deviceId;
+            $payload['receivedAndDeliveryCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/received-and-delivery?userId=' . $userId . '&deviceId=' . $deviceId;
+            $payload['disconnectedCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/disconnected?userId=' . $userId . '&deviceId=' . $deviceId;
+            $payload['connectedCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/connected?userId=' . $userId . '&deviceId=' . $deviceId;
+            $payload['messageStatusCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/message-status?userId=' . $userId . '&deviceId=' . $deviceId;
+            $payload['blockCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/block?userId=' . $userId . '&deviceId=' . $deviceId;
+        }
+
+        $res = Http::withToken(config('funapi.token'))->post(config('funapi.on_demand_url'), $payload);
+
         if ($res->failed()) {
             return ['error' => $res->json('error', 'Failed to create instance')];
         }
+
         return ['uid' => $res->json('id'), 'token' => $res->json('token')];
     }
 

@@ -8,6 +8,9 @@ return [
     'subscription_url' => env('FUNAPI_BASE_URL') . '/instances/UID/token/TOKEN/integrator/on-demand/subscription',
     'unsubscription_url' => env('FUNAPI_BASE_URL') . '/instances/UID/token/TOKEN/integrator/on-demand/cancel',
 
+    // Webhook configuration
+    'webhook_base_url' => env('WEBHOOK_BASE_URL', env('APP_URL')),
+
     /*
     |--------------------------------------------------------------------------
     | HTTP Request Configuration
