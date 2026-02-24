@@ -15,6 +15,10 @@ use Funnelchat\WapiGateway\Resources\Uazapi\RebootResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\CheckPhoneResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\ContactResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\GroupsResource;
+use Funnelchat\WapiGateway\Data\InstanceStatusData;
+use Funnelchat\WapiGateway\Data\MessageResultData;
+use Funnelchat\WapiGateway\Data\QrCodeData;
+use Funnelchat\WapiGateway\Exceptions\WapiException;
 use Funnelchat\WapiGateway\Resources\Uazapi\GroupResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\CreateGroupResource;
 use Illuminate\Support\Facades\Http;
@@ -27,13 +31,14 @@ class UazapiClient extends AbstractWhatsAppClient implements MessagesContract, I
     private const CONNECTED = 'connected';
     private const INSTANCE_STATUSES = [self::DISCONNECTED, self::CONNECTING, self::CONNECTED];
     private const QR_CODE_RETRIEVAL_ERROR_MESSAGE = 'Error retrieving QR code or pair code.';
+    private const PROVIDER = 'uazapi';
 
     protected function getConfigPrefix(): string
     {
         return 'uazapi';
     }
 
-    public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
+    public function sendText(string $uid, string $token, string $to, string $text, array $options = []): MessageResultData
     {
         $base = config('uazapi.base_url');
         $payload = ['number' => $to, 'text' => $text];
@@ -46,9 +51,9 @@ class UazapiClient extends AbstractWhatsAppClient implements MessagesContract, I
         ]);
 
         if ($res->failed() || $res->json('error')) {
-            return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
+            throw new WapiException($this->formatError($res->json('message') ?? $res->json('error') ?? 'error'), self::PROVIDER, rawError: $res->json());
         }
-        return MessageResource::make($res->json());
+        return MessageResultData::fromUazapi($res->json());
     }
 
     public function create(int $userId, int $deviceId): array
@@ -80,7 +85,26 @@ class UazapiClient extends AbstractWhatsAppClient implements MessagesContract, I
         ];
     }
 
-    public function status(string $uid, string $token): array
+    public function status(string $uid, string $token): InstanceStatusData
+    {
+        $result = $this->collectStatusPayload($uid, $token);
+
+        if (isset($result['error'])) {
+            throw new WapiException($this->formatError($result['error']), self::PROVIDER);
+        }
+
+        $qr = $result['qrCode'] ?? null;
+
+        return new InstanceStatusData(
+            connected: ($result['accountStatus'] ?? '') === 'authenticated',
+            accountStatus: $result['accountStatus'] ?? 'unknown',
+            qrCode: $qr ? new QrCodeData($qr, null, null) : null,
+            phone: $result['phone'] ?? null,
+            provider: self::PROVIDER,
+        );
+    }
+
+    private function collectStatusPayload(string $uid, string $token): array
     {
         $url = config('uazapi.base_url') . config('uazapi.endpoints.status');
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->get($url);
@@ -199,13 +223,19 @@ class UazapiClient extends AbstractWhatsAppClient implements MessagesContract, I
         ];
     }
 
-    public function qrCode(string $uid, string $token): array
+    public function qrCode(string $uid, string $token): QrCodeData
     {
         $url = config('uazapi.base_url') . config('uazapi.endpoints.qr_code');
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->withBody('{}', 'application/json')->post($url);
-        if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
+        if ($res->failed()) {
+            throw new WapiException($this->formatError($res->json('message') ?? $res->json('error') ?? 'error'), self::PROVIDER, rawError: $res->json());
+        }
+
         $data = $res->json();
-        return ['qrcode' => $data['instance']['qrcode'] ?? $data['qrcode'] ?? null, 'paircode' => $data['instance']['paircode'] ?? $data['paircode'] ?? null];
+        $value = $data['instance']['qrcode'] ?? $data['qrcode'] ?? null;
+        $pairCode = $data['instance']['paircode'] ?? $data['paircode'] ?? null;
+
+        return new QrCodeData($value, $pairCode, null);
     }
 
     public function logout(string $uid, string $token): array
@@ -257,20 +287,22 @@ class UazapiClient extends AbstractWhatsAppClient implements MessagesContract, I
         return [];
     }
 
-    public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
+    public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): MessageResultData
     {
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $type = $this->mapType($ext);
-        if ($type === 'invalid') return ['error' => 'Invalid file extension'];
+        if ($type === 'invalid') {
+            throw new WapiException('invalid_file_extension', self::PROVIDER);
+        }
         $payload = ['number' => $to, 'type' => $type, 'file' => $fileUrl];
         if (isset($options['caption'])) $payload['text'] = $options['caption'];
         if (isset($options['fileName']) && $type === 'document') $payload['docName'] = $options['fileName'];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post(config('uazapi.base_url') . config('uazapi.endpoints.send_document'), $payload);
         if ($res->failed() || $res->json('error')) {
-            return ['error' => $this->formatError($res->json('error'))];
+            throw new WapiException($this->formatError($res->json('error')), self::PROVIDER, rawError: $res->json());
         }
-        return MessageResource::make($res->json());
+        return MessageResultData::fromUazapi($res->json());
     }
 
     public function sendLocation(string $uid, string $token, string $to, float $lat, float $lng, array $options = []): array
@@ -362,7 +394,8 @@ class UazapiClient extends AbstractWhatsAppClient implements MessagesContract, I
             if (!empty($event['location']['address'])) $text .= "\n   " . $event['location']['address'];
         }
         if (!empty($event['callLinkType'])) $text .= "\n📞 Tipo: " . ($event['callLinkType'] === 'video' ? 'Videollamada' : 'Llamada de voz');
-        return $this->sendText($uid, $token, $toGroupPhone, $text, $options);
+        $result = $this->sendText($uid, $token, $toGroupPhone, $text, $options);
+        return $result->toArray();
     }
 
     public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array

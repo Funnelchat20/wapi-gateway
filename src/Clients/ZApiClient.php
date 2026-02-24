@@ -8,11 +8,14 @@ use Funnelchat\WapiGateway\Contracts\GroupsContract;
 use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\QueueContract;
 use Funnelchat\WapiGateway\Resources\Zapi\MessageResource;
-use Funnelchat\WapiGateway\Resources\Zapi\QrCodeResource;
 use Funnelchat\WapiGateway\Resources\Zapi\MeResource;
 use Funnelchat\WapiGateway\Resources\Zapi\LogOutResource;
 use Funnelchat\WapiGateway\Resources\Zapi\RebootResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CheckPhoneResource;
+use Funnelchat\WapiGateway\Data\InstanceStatusData;
+use Funnelchat\WapiGateway\Data\MessageResultData;
+use Funnelchat\WapiGateway\Data\QrCodeData;
+use Funnelchat\WapiGateway\Exceptions\WapiException;
 use Funnelchat\WapiGateway\Resources\Zapi\ContactResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupsResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupResource;
@@ -27,13 +30,14 @@ class ZApiClient extends AbstractWhatsAppClient implements MessagesContract, Ins
     private const PENDING_SUBSCRIPTION = 'To continue sending a message, you must subscribe to this instance again';
     private const INSTANCE_STATUSES = [self::YOU_ARE_ALREADY_CONNECTED, self::YOU_ARE_NOT_CONNECTED];
     private const QR_CODE_RETRIEVAL_ERROR_MESSAGE = 'Error retrieving QR code.';
+    private const PROVIDER = 'zapi';
 
     protected function getConfigPrefix(): string
     {
         return 'zapi';
     }
 
-    public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
+    public function sendText(string $uid, string $token, string $to, string $text, array $options = []): MessageResultData
     {
         $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'send-text');
@@ -49,11 +53,11 @@ class ZApiClient extends AbstractWhatsAppClient implements MessagesContract, Ins
         if ($res->failed() || $res->json('error')) {
             $error = $this->formatError($res->json('error', 'error'));
             $this->logRequest('sendText', $uid, ['error' => $error, 'phone' => $to], $startTime, $res);
-            return ['error' => $error];
+            throw new WapiException($error, self::PROVIDER, rawError: $res->json());
         }
 
         $this->logRequest('sendText', $uid, ['phone' => $to, 'has_retry' => $options['retry'] ?? false], $startTime, $res);
-        return MessageResource::make($res->json());
+        return MessageResultData::fromZapi($res->json());
     }
 
     public function create(int $userId, int $deviceId): array
@@ -85,64 +89,65 @@ class ZApiClient extends AbstractWhatsAppClient implements MessagesContract, Ins
         return ['uid' => $res->json('id'), 'token' => $res->json('token')];
     }
 
-    public function status(string $uid, string $token): array
+    public function status(string $uid, string $token): InstanceStatusData
     {
         $url = $this->buildUrl($uid, $token, 'status');
-        $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url);
+        $res = Http::withHeaders($this->defaultHeaders())->get($url);
 
-        // Handle failures - check for PENDING_SUBSCRIPTION special case
         if ($res->failed()) {
             $error = $res->json('error');
 
-            // Special handling for PENDING_SUBSCRIPTION
             if ($error === self::PENDING_SUBSCRIPTION) {
-                return ['accountStatus' => $this->formatError(self::PENDING_SUBSCRIPTION)];
+                return new InstanceStatusData(
+                    connected: false,
+                    accountStatus: $this->formatError(self::PENDING_SUBSCRIPTION),
+                    qrCode: null,
+                    phone: null,
+                    provider: self::PROVIDER,
+                );
             }
 
-            // If error exists and it's not a recognized instance status, return error
-            if ($error && !in_array($error, self::INSTANCE_STATUSES)) {
-                return ['error' => $this->formatError($error)];
-            }
+            throw new WapiException($this->formatError($error ?? 'status_failed'), self::PROVIDER, rawError: $res->json());
         }
 
         $data = $res->json();
-
-        // ALWAYS add accountStatus field (WAPI compatibility)
         $accountStatus = 'authenticated';
-        $qrCode = '';
+        $qrCodeValue = null;
 
-        // Special handling for "You are not connected"
         if (isset($data['error']) && $data['error'] === self::YOU_ARE_NOT_CONNECTED) {
             $accountStatus = 'got qr code';
-
-            // MAKE SECOND API CALL to get QR code automatically
             $qrUrl = $this->buildUrl($uid, $token, 'qr-code/image');
-            $qrRes = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($qrUrl);
+            $qrRes = Http::withHeaders($this->defaultHeaders())->get($qrUrl);
 
             if ($qrRes->failed() || $qrRes->json('error')) {
-                return ['error' => self::QR_CODE_RETRIEVAL_ERROR_MESSAGE];
+                throw new WapiException(self::QR_CODE_RETRIEVAL_ERROR_MESSAGE, self::PROVIDER, rawError: $qrRes->json());
             }
 
-            if (!isset($qrRes->json()['value'])) {
-                return ['error' => self::QR_CODE_RETRIEVAL_ERROR_MESSAGE];
+            $qrCodeValue = $qrRes->json('value');
+            if (!$qrCodeValue) {
+                throw new WapiException(self::QR_CODE_RETRIEVAL_ERROR_MESSAGE, self::PROVIDER, rawError: $qrRes->json());
             }
-
-            $qrCode = $qrRes->json()['value'];
         }
 
-        // Return ONLY the fields that WAPI original returns (StatusResource)
-        return [
-            'accountStatus' => $accountStatus,
-            'qrCode' => $qrCode,
-        ];
+        return new InstanceStatusData(
+            connected: $accountStatus === 'authenticated',
+            accountStatus: $accountStatus,
+            qrCode: $qrCodeValue ? new QrCodeData($qrCodeValue, null, null) : null,
+            phone: $data['device']['phone'] ?? null,
+            provider: self::PROVIDER,
+        );
     }
 
-    public function qrCode(string $uid, string $token): array
+    public function qrCode(string $uid, string $token): QrCodeData
     {
         $url = $this->buildUrl($uid, $token, 'qr-code/image');
-        $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return QrCodeResource::make($res->json());
+        $res = Http::withHeaders($this->defaultHeaders())->get($url);
+        if ($res->failed() || $res->json('error')) {
+            throw new WapiException($this->formatError($res->json('error', 'error')), self::PROVIDER, rawError: $res->json());
+        }
+
+        $payload = $res->json();
+        return new QrCodeData($payload['value'] ?? null, $payload['url'] ?? null, $payload['expiresIn'] ?? $payload['expiration'] ?? null);
     }
 
     public function logout(string $uid, string $token): array
@@ -206,12 +211,14 @@ class ZApiClient extends AbstractWhatsAppClient implements MessagesContract, Ins
         return $res->json('participants') ?? [];
     }
 
-    public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
+    public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): MessageResultData
     {
         $startTime = microtime(true);
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $action = $this->mapAction($ext);
-        if ($action === 'invalid') return ['error' => 'Invalid file extension'];
+        if ($action === 'invalid') {
+            throw new WapiException('invalid_file_extension', self::PROVIDER);
+        }
         if ($action === 'send-document') $action = $action . '/' . $ext;
         $attr = $this->mapAttr($ext);
         $params = ['phone' => $to, $attr => $fileUrl];
@@ -249,11 +256,11 @@ class ZApiClient extends AbstractWhatsAppClient implements MessagesContract, Ins
             $error = $this->formatError($res->json('error', 'error'));
             $context['error'] = $error;
             $this->logRequest('sendFile', $uid, $context, $startTime, $res);
-            return ['error' => $error];
+            throw new WapiException($error, self::PROVIDER, rawError: $res->json());
         }
 
         $this->logRequest('sendFile', $uid, $context, $startTime, $res);
-        return MessageResource::make($res->json());
+        return MessageResultData::fromZapi($res->json());
     }
 
     public function sendLocation(string $uid, string $token, string $to, float $lat, float $lng, array $options = []): array

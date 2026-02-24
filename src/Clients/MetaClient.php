@@ -6,15 +6,21 @@ use Funnelchat\WapiGateway\Contracts\MessagesContract;
 use Funnelchat\WapiGateway\Contracts\InstancesContract;
 use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\TemplatesContract;
+use Funnelchat\WapiGateway\Data\InstanceStatusData;
+use Funnelchat\WapiGateway\Data\MessageResultData;
+use Funnelchat\WapiGateway\Data\QrCodeData;
 use Funnelchat\WapiGateway\Exceptions\UnsupportedOperationException;
+use Funnelchat\WapiGateway\Exceptions\WapiException;
 use Funnelchat\WapiGateway\Helpers\WhatsAppCloudHelper;
 use Illuminate\Support\Facades\Http;
 
 class MetaClient implements MessagesContract, InstancesContract, ContactsContract, TemplatesContract
 {
+    private const PROVIDER = 'meta';
+
     private string $graph = 'https://graph.facebook.com/v20.0/';
 
-    public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
+    public function sendText(string $uid, string $token, string $to, string $text, array $options = []): MessageResultData
     {
         $url = $this->graph . $uid . '/messages';
         $payload = [
@@ -25,17 +31,19 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         ];
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
-            return ['error' => $res->json('error', 'Failed to send')];
+            $error = $res->json('error.message') ?? $res->json('error', 'Failed to send');
+            $code = $res->json('error.code');
+            throw new WapiException(is_string($error) ? $error : 'Failed to send', self::PROVIDER, errorCode: $code ? (string) $code : null, rawError: $res->json());
         }
-        return $res->json();
+        return MessageResultData::fromMeta($res->json());
     }
 
     public function create(int $userId, int $deviceId): array
     {
         $this->unsupported(__FUNCTION__);
     }
-    public function status(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
-    public function qrCode(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
+    public function status(string $uid, string $token): InstanceStatusData { $this->unsupported(__FUNCTION__); }
+    public function qrCode(string $uid, string $token): QrCodeData { $this->unsupported(__FUNCTION__); }
     public function logout(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
     public function reboot(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
     public function me(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
@@ -44,17 +52,23 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     public function unsubscribe(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
     public function getParticipants(string $uid, string $token, string $phone): array { return []; }
 
-    public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
+    public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): MessageResultData
     {
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $type = $this->mapType($ext);
-        if ($type === 'invalid') return ['error' => 'Invalid file extension'];
+        if ($type === 'invalid') {
+            throw new WapiException('invalid_file_extension', self::PROVIDER);
+        }
         $payload = ['messaging_product' => 'whatsapp', 'to' => $to, 'type' => $type, $type => ['link' => $fileUrl]];
         if (isset($options['fileName']) && $type === 'document') $payload[$type]['filename'] = $options['fileName'];
         if (isset($options['caption']) && in_array($type, ['image', 'video', 'document'])) $payload[$type]['caption'] = $options['caption'];
         $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
-        if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
-        return $res->json();
+        if ($res->failed()) {
+            $error = $res->json('error.message') ?? $res->json('error', 'Failed to send');
+            $code = $res->json('error.code');
+            throw new WapiException(is_string($error) ? $error : 'Failed to send', self::PROVIDER, errorCode: $code ? (string) $code : null, rawError: $res->json());
+        }
+        return MessageResultData::fromMeta($res->json());
     }
 
     public function sendLocation(string $uid, string $token, string $to, float $lat, float $lng, array $options = []): array

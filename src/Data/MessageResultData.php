@@ -17,6 +17,11 @@ class MessageResultData
         return new self(isset($payload['messageId']), $payload['messageId'] ?? '', '', '');
     }
 
+    public static function fromFunapi(array $payload): self
+    {
+        return self::fromZapi($payload);
+    }
+
     public static function fromMeta(array $payload): self
     {
         $id = $payload['messages'][0]['id'] ?? '';
