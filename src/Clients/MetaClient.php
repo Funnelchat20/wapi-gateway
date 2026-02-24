@@ -6,16 +6,25 @@ use Funnelchat\WapiGateway\Contracts\MessagesContract;
 use Funnelchat\WapiGateway\Contracts\InstancesContract;
 use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\TemplatesContract;
+use Funnelchat\WapiGateway\Exceptions\UnsupportedOperationException;
 use Funnelchat\WapiGateway\Helpers\WhatsAppCloudHelper;
 use Illuminate\Support\Facades\Http;
 
 class MetaClient implements MessagesContract, InstancesContract, ContactsContract, TemplatesContract
 {
-    private string $graph = 'https://graph.facebook.com/v20.0/';
+    /**
+     * Returns the base Graph API URL, using the version configured in wapi.meta.graph_version
+     * (env: WAPI_META_GRAPH_VERSION, default: v20.0).
+     */
+    private function graphUrl(): string
+    {
+        $version = config('wapi.meta.graph_version', 'v20.0');
+        return "https://graph.facebook.com/{$version}/";
+    }
 
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
     {
-        $url = $this->graph . $uid . '/messages';
+        $url = $this->graphUrl() . $uid . '/messages';
         $payload = [
             'messaging_product' => 'whatsapp',
             'to' => $to,
@@ -31,16 +40,16 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function create(int $userId, int $deviceId): array
     {
-        return ['error' => 'Not supported'];
+        throw new UnsupportedOperationException(__FUNCTION__, 'WhatsAppCloud');
     }
-    public function status(string $uid, string $token): array { return ['error' => 'Not supported']; }
-    public function qrCode(string $uid, string $token): array { return ['error' => 'Not supported']; }
-    public function logout(string $uid, string $token): array { return ['error' => 'Not supported']; }
-    public function reboot(string $uid, string $token): array { return ['error' => 'Not supported']; }
-    public function me(string $uid, string $token): array { return ['error' => 'Not supported']; }
-    public function checkPhone(string $uid, string $token, string $phone): array { return ['error' => 'Not supported']; }
-    public function subscribe(string $uid, string $token): array { return ['error' => 'Not supported']; }
-    public function unsubscribe(string $uid, string $token): array { return ['error' => 'Not supported']; }
+    public function status(string $uid, string $token): array { throw new UnsupportedOperationException(__FUNCTION__, 'WhatsAppCloud'); }
+    public function qrCode(string $uid, string $token): array { throw new UnsupportedOperationException(__FUNCTION__, 'WhatsAppCloud'); }
+    public function logout(string $uid, string $token): array { throw new UnsupportedOperationException(__FUNCTION__, 'WhatsAppCloud'); }
+    public function reboot(string $uid, string $token): array { throw new UnsupportedOperationException(__FUNCTION__, 'WhatsAppCloud'); }
+    public function me(string $uid, string $token): array { throw new UnsupportedOperationException(__FUNCTION__, 'WhatsAppCloud'); }
+    public function checkPhone(string $uid, string $token, string $phone): array { throw new UnsupportedOperationException(__FUNCTION__, 'WhatsAppCloud'); }
+    public function subscribe(string $uid, string $token): array { throw new UnsupportedOperationException(__FUNCTION__, 'WhatsAppCloud'); }
+    public function unsubscribe(string $uid, string $token): array { throw new UnsupportedOperationException(__FUNCTION__, 'WhatsAppCloud'); }
     public function getParticipants(string $uid, string $token, string $phone): array { return []; }
 
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
@@ -51,7 +60,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $payload = ['messaging_product' => 'whatsapp', 'to' => $to, 'type' => $type, $type => ['link' => $fileUrl]];
         if (isset($options['fileName']) && $type === 'document') $payload[$type]['filename'] = $options['fileName'];
         if (isset($options['caption']) && in_array($type, ['image', 'video', 'document'])) $payload[$type]['caption'] = $options['caption'];
-        $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
+        $res = Http::withToken($token)->post($this->graphUrl() . $uid . '/messages', $payload);
         if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
         return $res->json();
     }
@@ -61,7 +70,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $payload = ['messaging_product' => 'whatsapp', 'to' => $to, 'type' => 'location', 'location' => ['latitude' => $lat, 'longitude' => $lng]];
         if (isset($options['name'])) $payload['location']['name'] = $options['name'];
         if (isset($options['address'])) $payload['location']['address'] = $options['address'];
-        $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
+        $res = Http::withToken($token)->post($this->graphUrl() . $uid . '/messages', $payload);
         if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
         return $res->json();
     }
@@ -92,7 +101,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             if ($mediaType === 'invalid') return ['error' => 'Invalid file extension'];
             $payload['interactive']['header'] = ['type' => $mediaType, $mediaType => ['link' => $options['fileUrl']]];
         }
-        $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
+        $res = Http::withToken($token)->post($this->graphUrl() . $uid . '/messages', $payload);
         if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
         return $res->json();
     }
@@ -109,7 +118,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 'action' => ['name' => 'cta_url', 'parameters' => ['display_text' => $label, 'url' => $url]]
             ]
         ];
-        $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
+        $res = Http::withToken($token)->post($this->graphUrl() . $uid . '/messages', $payload);
         if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
         return $res->json();
     }
@@ -154,27 +163,27 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 ]
             ]
         ];
-        $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
+        $res = Http::withToken($token)->post($this->graphUrl() . $uid . '/messages', $payload);
         if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
         return $res->json();
     }
 
     public function sendPoll(string $uid, string $token, string $to, string $message, array $pollOptions, array $options = []): array
     {
-        return ['error' => 'Not supported'];
+        throw new UnsupportedOperationException(__FUNCTION__, 'WhatsAppCloud');
     }
 
     public function sendLink(string $uid, string $token, string $to, string $message, string $linkUrl, array $options = []): array
     {
         $payload = ['messaging_product' => 'whatsapp', 'to' => $to, 'type' => 'text', 'text' => ['body' => $message . ' ' . $linkUrl]];
-        $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
+        $res = Http::withToken($token)->post($this->graphUrl() . $uid . '/messages', $payload);
         if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
         return $res->json();
     }
 
     public function sendEvent(string $uid, string $token, string $toGroupPhone, array $event, array $options = []): array
     {
-        return ['error' => 'Not supported'];
+        throw new UnsupportedOperationException(__FUNCTION__, 'WhatsAppCloud');
     }
 
     public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
@@ -189,7 +198,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 'components' => $components
             ]
         ];
-        $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
+        $res = Http::withToken($token)->post($this->graphUrl() . $uid . '/messages', $payload);
         if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
         return $res->json();
     }
@@ -206,12 +215,12 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function contact(string $uid, string $token, string $phone): array
     {
-        return ['error' => 'Not supported'];
+        throw new UnsupportedOperationException(__FUNCTION__, 'WhatsAppCloud');
     }
 
     public function contacts(string $uid, string $token, array $options = []): array
     {
-        return ['error' => 'Not supported'];
+        throw new UnsupportedOperationException(__FUNCTION__, 'WhatsAppCloud');
     }
 
     public function sendContact(string $uid, string $token, string $to, string $contactName, string $contactPhone, array $options = []): array
@@ -225,14 +234,14 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 'phones' => [[ 'phone' => $contactPhone, 'wa_id' => $contactPhone ]]
             ]]
         ];
-        $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
+        $res = Http::withToken($token)->post($this->graphUrl() . $uid . '/messages', $payload);
         if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
         return $res->json();
     }
 
     public function listTemplates(string $wabaId, string $token, array $params = []): array
     {
-        $url = $this->graph . $wabaId . '/message_templates';
+        $url = $this->graphUrl() . $wabaId . '/message_templates';
         if (!empty($params)) {
             $query = [];
             if (isset($params['limit'])) $query['limit'] = $params['limit'];
@@ -246,7 +255,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function getTemplate(string $wabaId, string $token, string $name): array
     {
-        $url = $this->graph . $wabaId . '/message_templates?name=' . urlencode($name);
+        $url = $this->graphUrl() . $wabaId . '/message_templates?name=' . urlencode($name);
         $res = Http::withToken($token)->get($url);
         if ($res->failed()) return ['error' => $res->json('error', 'Failed to get')];
         return $res->json();
@@ -255,7 +264,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     public function createTemplate(string $wabaId, string $token, array $data): array
     {
         $header = (!empty($data['header']) || !empty($data['file']))
-            ? WhatsAppCloudHelper::getHeaderTemplate($data['type'], $data['header'] ?? null, $data['file'] ?? null, $token, $this->graph)
+            ? WhatsAppCloudHelper::getHeaderTemplate($data['type'], $data['header'] ?? null, $data['file'] ?? null, $token, $this->graphUrl())
             : [];
         $body = WhatsAppCloudHelper::getBodyTemplate($data['body'], $data['params'][0]['body'] ?? null);
         $footer = !empty($data['footer']) ? ['type' => 'FOOTER', 'text' => $data['footer']] : [];
@@ -267,7 +276,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'category' => $data['category'],
             'components' => $components
         ];
-        $res = Http::withToken($token)->post($this->graph . $wabaId . '/message_templates', $payload);
+        $res = Http::withToken($token)->post($this->graphUrl() . $wabaId . '/message_templates', $payload);
         if ($res->failed()) return ['error' => $res->json('error', 'Failed to create')];
         return $res->json();
     }
@@ -275,7 +284,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     public function updateTemplate(string $templateUid, string $token, array $data): array
     {
         $header = (!empty($data['header']) || !empty($data['file']))
-            ? WhatsAppCloudHelper::getHeaderTemplate($data['type'], $data['header'] ?? null, $data['file'] ?? null, $token, $this->graph)
+            ? WhatsAppCloudHelper::getHeaderTemplate($data['type'], $data['header'] ?? null, $data['file'] ?? null, $token, $this->graphUrl())
             : [];
         $body = WhatsAppCloudHelper::getBodyTemplate($data['body'], $data['params'][0]['body'] ?? null);
         $footer = !empty($data['footer']) ? ['type' => 'FOOTER', 'text' => $data['footer']] : [];
@@ -285,14 +294,14 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'category' => $data['category'],
             'components' => $components
         ];
-        $res = Http::withToken($token)->post($this->graph . $templateUid, $payload);
+        $res = Http::withToken($token)->post($this->graphUrl() . $templateUid, $payload);
         if ($res->failed()) return ['error' => $res->json('error', 'Failed to update')];
         return $res->json();
     }
 
     public function deleteTemplate(string $wabaId, string $token, string $name, string $uid): array
     {
-        $url = $this->graph . $wabaId . '/message_templates';
+        $url = $this->graphUrl() . $wabaId . '/message_templates';
         $res = Http::withToken($token)->delete($url, ['name' => $name, 'hsm_id' => $uid]);
         if ($res->failed()) return ['error' => $res->json('error', 'Failed to delete')];
         return $res->json();
@@ -306,12 +315,12 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $fileSize = strlen($fileContent);
         $finfo = new \finfo(FILEINFO_MIME_TYPE);
         $fileMimeType = $finfo->buffer($fileContent);
-        $session = Http::withToken($token)->post($this->graph . env('META_APP_ID') . '/uploads?file_length=' . $fileSize . '&file_type=' . $fileMimeType, []);
+        $session = Http::withToken($token)->post($this->graphUrl() . env('META_APP_ID') . '/uploads?file_length=' . $fileSize . '&file_type=' . $fileMimeType, []);
         if ($session->failed() || $session->json('error')) return ['error' => $session->json('error')];
         $sessionId = $session->json('id');
         $response = Http::withHeaders(['Authorization' => 'OAuth ' . $token, 'file_offset' => 0, 'Content-Type' => $fileMimeType])
             ->withBody($fileContent, 'application/octet-stream')
-            ->post($this->graph . $sessionId);
+            ->post($this->graphUrl() . $sessionId);
         if ($response->failed() || $response->json('error')) return ['error' => $response->json('error')];
         return $response->json();
     }
