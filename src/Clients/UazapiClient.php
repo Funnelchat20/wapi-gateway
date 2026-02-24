@@ -19,7 +19,7 @@ use Funnelchat\WapiGateway\Resources\Uazapi\GroupResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\CreateGroupResource;
 use Illuminate\Support\Facades\Http;
 
-class UazapiClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract
+class UazapiClient extends AbstractWhatsAppClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract
 {
     // Status constants for compatibility with WAPI
     private const DISCONNECTED = 'disconnected';
@@ -28,13 +28,23 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
     private const INSTANCE_STATUSES = [self::DISCONNECTED, self::CONNECTING, self::CONNECTED];
     private const QR_CODE_RETRIEVAL_ERROR_MESSAGE = 'Error retrieving QR code or pair code.';
 
+    protected function getConfigPrefix(): string
+    {
+        return 'uazapi';
+    }
+
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
     {
         $base = config('uazapi.base_url');
-        $timeout = config('uazapi.timeout', 120);
         $payload = ['number' => $to, 'text' => $text];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
-        $res = Http::withHeaders(['token' => $token])->timeout($timeout)->asJson()->post($base . config('uazapi.endpoints.send_message'), $payload);
+
+        $res = $this->makeAuthenticatedRequest('post', $base . config('uazapi.endpoints.send_message'), $payload, [
+            'headers' => ['token' => $token],
+            'as_json' => true,
+            'timeout' => config('uazapi.timeout', 120),
+        ]);
+
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
         }
@@ -371,9 +381,12 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         ][$ext] ?? 'invalid';
     }
 
-    private function formatError(?string $error): string
+    protected function mapErrorCodes(string $error): string
     {
-        if ($error === null) return 'Unknown error';
+        if ($error === 'unknown_error' || $error === '') {
+            return 'Unknown error';
+        }
+
         return ucfirst(str_replace(['_', '-'], ' ', strtolower($error)));
     }
 
