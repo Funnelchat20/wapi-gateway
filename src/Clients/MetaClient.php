@@ -47,46 +47,73 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $this->unsupported(__FUNCTION__);
     }
 
+    /**
+     * @throws \Funnelchat\WapiGateway\Exceptions\UnsupportedOperationException
+     */
     public function status(string $uid, string $token): never
     {
         $this->unsupported(__FUNCTION__);
     }
 
+    /**
+     * @throws \Funnelchat\WapiGateway\Exceptions\UnsupportedOperationException
+     */
     public function qrCode(string $uid, string $token): never
     {
         $this->unsupported(__FUNCTION__);
     }
 
+    /**
+     * @throws \Funnelchat\WapiGateway\Exceptions\UnsupportedOperationException
+     */
     public function logout(string $uid, string $token): never
     {
         $this->unsupported(__FUNCTION__);
     }
 
+    /**
+     * @throws \Funnelchat\WapiGateway\Exceptions\UnsupportedOperationException
+     */
     public function reboot(string $uid, string $token): never
     {
         $this->unsupported(__FUNCTION__);
     }
 
+    /**
+     * @throws \Funnelchat\WapiGateway\Exceptions\UnsupportedOperationException
+     */
     public function me(string $uid, string $token): never
     {
         $this->unsupported(__FUNCTION__);
     }
 
+    /**
+     * @throws \Funnelchat\WapiGateway\Exceptions\UnsupportedOperationException
+     */
     public function checkPhone(string $uid, string $token, string $phone): never
     {
         $this->unsupported(__FUNCTION__);
     }
 
+    /**
+     * @throws \Funnelchat\WapiGateway\Exceptions\UnsupportedOperationException
+     */
     public function subscribe(string $uid, string $token): never
     {
         $this->unsupported(__FUNCTION__);
     }
 
+    /**
+     * @throws \Funnelchat\WapiGateway\Exceptions\UnsupportedOperationException
+     */
     public function unsubscribe(string $uid, string $token): never
     {
         $this->unsupported(__FUNCTION__);
     }
 
+    /**
+     * @throws \Funnelchat\WapiGateway\Exceptions\UnsupportedOperationException
+     */
     public function getParticipants(string $uid, string $token, string $phone): never
     {
         $this->unsupported(__FUNCTION__);

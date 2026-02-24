@@ -33,17 +33,31 @@ class UazapiClientTest extends TestCase
 
     public function test_send_text_returns_message_result_dto(): void
     {
+        $number = '5511999999999';
+        $message = 'Hello world';
+
         Http::fake([
             'https://uazapi.test/send-text' => Http::response([
                 'messageId' => 'msg-123',
             ], 200),
         ]);
 
-        $result = $this->client->sendText('UID', 'TOKEN', '5511999999999', 'Hello world');
+        $result = $this->client->sendText('UID', 'TOKEN', $number, $message);
 
         $this->assertInstanceOf(MessageResultData::class, $result);
         $this->assertTrue($result->sent);
         $this->assertSame('msg-123', $result->id);
+
+        Http::assertSent(function ($request) use ($number, $message) {
+            $token = $request->header('token')[0] ?? null;
+
+            return $request->url() === 'https://uazapi.test/send-text'
+                && $request['number'] === $number
+                && $request['text'] === $message
+                && $token === 'TOKEN';
+        });
+
+        Http::assertSentCount(1);
     }
 
     public function test_send_text_throws_wapi_exception_on_failure(): void

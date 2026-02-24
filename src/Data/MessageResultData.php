@@ -2,6 +2,9 @@
 
 namespace Funnelchat\WapiGateway\Data;
 
+/**
+ * Immutable DTO for WhatsApp send results.
+ */
 class MessageResultData
 {
     public function __construct(

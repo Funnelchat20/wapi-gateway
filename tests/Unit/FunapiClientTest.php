@@ -33,23 +33,40 @@ class FunapiClientTest extends TestCase
 
     public function test_send_text_returns_message_result_dto(): void
     {
+        $number = '5511999999999';
+        $message = 'Hello world';
+        $endpoint = 'https://funapi.test/instances/UID/token/TOKEN/send-text';
+
         Http::fake([
-            'https://funapi.test/*' => Http::response([
+            $endpoint => Http::response([
                 'messageId' => 'msg-456',
             ], 200),
         ]);
 
-        $result = $this->client->sendText('UID', 'TOKEN', '5511999999999', 'Hello world');
+        $result = $this->client->sendText('UID', 'TOKEN', $number, $message);
 
         $this->assertInstanceOf(MessageResultData::class, $result);
         $this->assertTrue($result->sent);
         $this->assertSame('msg-456', $result->id);
+
+        Http::assertSent(function ($request) use ($number, $message, $endpoint) {
+            $clientToken = $request->header('Client-Token')[0] ?? null;
+
+            return $request->url() === $endpoint
+                && $request['phone'] === $number
+                && $request['message'] === $message
+                && $clientToken === 'client-token';
+        });
+
+        Http::assertSentCount(1);
     }
 
     public function test_send_text_throws_wapi_exception_on_failure(): void
     {
+        $endpoint = 'https://funapi.test/instances/UID/token/TOKEN/send-text';
+
         Http::fake([
-            'https://funapi.test/*' => Http::response([
+            $endpoint => Http::response([
                 'error' => 'Whatsapp not connected',
             ], 422),
         ]);
