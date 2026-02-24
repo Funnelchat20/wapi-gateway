@@ -16,6 +16,8 @@ class WapiServiceProvider extends ServiceProvider
 {
     public function register()
     {
+        $this->mergeConfigFrom(__DIR__ . '/../../config/wapi.php', 'wapi');
+
         $this->app->singleton(ServiceInterface::class, function ($app) {
             return new class implements ServiceInterface {};
         });
@@ -33,6 +35,7 @@ class WapiServiceProvider extends ServiceProvider
             __DIR__ . '/../../config/uazapi.php' => config_path('uazapi.php'),
             __DIR__ . '/../../config/funapi.php' => config_path('funapi.php'),
             __DIR__ . '/../../config/constants.php' => config_path('constants.php'),
+            __DIR__ . '/../../config/wapi.php' => config_path('wapi.php'),
         ], 'wapi-config');
 
         $this->app->singleton('wapi.gateway', function ($app) {

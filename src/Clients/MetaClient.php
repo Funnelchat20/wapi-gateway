@@ -18,7 +18,13 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 {
     private const PROVIDER = 'meta';
 
-    private string $graph = 'https://graph.facebook.com/v20.0/';
+    private string $graph;
+
+    public function __construct()
+    {
+        $version = trim(config('wapi.meta.graph_version', 'v20.0'), '/');
+        $this->graph = sprintf('https://graph.facebook.com/%s/', $version ?: 'v20.0');
+    }
 
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): MessageResultData
     {
