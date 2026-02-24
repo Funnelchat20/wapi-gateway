@@ -6,6 +6,7 @@ use Funnelchat\WapiGateway\Contracts\MessagesContract;
 use Funnelchat\WapiGateway\Contracts\InstancesContract;
 use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\TemplatesContract;
+use Funnelchat\WapiGateway\Exceptions\UnsupportedOperationException;
 use Funnelchat\WapiGateway\Helpers\WhatsAppCloudHelper;
 use Illuminate\Support\Facades\Http;
 
@@ -31,16 +32,16 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function create(int $userId, int $deviceId): array
     {
-        return ['error' => 'Not supported'];
+        $this->unsupported(__FUNCTION__);
     }
-    public function status(string $uid, string $token): array { return ['error' => 'Not supported']; }
-    public function qrCode(string $uid, string $token): array { return ['error' => 'Not supported']; }
-    public function logout(string $uid, string $token): array { return ['error' => 'Not supported']; }
-    public function reboot(string $uid, string $token): array { return ['error' => 'Not supported']; }
-    public function me(string $uid, string $token): array { return ['error' => 'Not supported']; }
-    public function checkPhone(string $uid, string $token, string $phone): array { return ['error' => 'Not supported']; }
-    public function subscribe(string $uid, string $token): array { return ['error' => 'Not supported']; }
-    public function unsubscribe(string $uid, string $token): array { return ['error' => 'Not supported']; }
+    public function status(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
+    public function qrCode(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
+    public function logout(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
+    public function reboot(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
+    public function me(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
+    public function checkPhone(string $uid, string $token, string $phone): array { $this->unsupported(__FUNCTION__); }
+    public function subscribe(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
+    public function unsubscribe(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
     public function getParticipants(string $uid, string $token, string $phone): array { return []; }
 
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
@@ -161,7 +162,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function sendPoll(string $uid, string $token, string $to, string $message, array $pollOptions, array $options = []): array
     {
-        return ['error' => 'Not supported'];
+        $this->unsupported(__FUNCTION__);
     }
 
     public function sendLink(string $uid, string $token, string $to, string $message, string $linkUrl, array $options = []): array
@@ -174,7 +175,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function sendEvent(string $uid, string $token, string $toGroupPhone, array $event, array $options = []): array
     {
-        return ['error' => 'Not supported'];
+        $this->unsupported(__FUNCTION__);
     }
 
     public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
@@ -194,6 +195,11 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return $res->json();
     }
 
+    private function unsupported(string $method): never
+    {
+        throw new UnsupportedOperationException("MetaClient does not support {$method}()");
+    }
+
     private function mapType(string $ext): string
     {
         return [
@@ -206,12 +212,12 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function contact(string $uid, string $token, string $phone): array
     {
-        return ['error' => 'Not supported'];
+        $this->unsupported(__FUNCTION__);
     }
 
     public function contacts(string $uid, string $token, array $options = []): array
     {
-        return ['error' => 'Not supported'];
+        $this->unsupported(__FUNCTION__);
     }
 
     public function sendContact(string $uid, string $token, string $to, string $contactName, string $contactPhone, array $options = []): array
