@@ -5,10 +5,10 @@ namespace Funnelchat\WapiGateway\Data;
 class MessageResultData
 {
     public function __construct(
-        public bool $sent,
-        public string $id = '',
-        public string $message = '',
-        public string $queueNumber = ''
+        public readonly bool $sent,
+        public readonly string $id = '',
+        public readonly string $message = '',
+        public readonly string $queueNumber = ''
     ) {
     }
 

@@ -6,9 +6,7 @@ use Funnelchat\WapiGateway\Contracts\MessagesContract;
 use Funnelchat\WapiGateway\Contracts\InstancesContract;
 use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\TemplatesContract;
-use Funnelchat\WapiGateway\Data\InstanceStatusData;
 use Funnelchat\WapiGateway\Data\MessageResultData;
-use Funnelchat\WapiGateway\Data\QrCodeData;
 use Funnelchat\WapiGateway\Exceptions\UnsupportedOperationException;
 use Funnelchat\WapiGateway\Exceptions\WapiException;
 use Funnelchat\WapiGateway\Helpers\WhatsAppCloudHelper;
@@ -44,19 +42,55 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return MessageResultData::fromMeta($res->json());
     }
 
-    public function create(int $userId, int $deviceId): array
+    public function create(int $userId, int $deviceId): never
     {
         $this->unsupported(__FUNCTION__);
     }
-    public function status(string $uid, string $token): InstanceStatusData { $this->unsupported(__FUNCTION__); }
-    public function qrCode(string $uid, string $token): QrCodeData { $this->unsupported(__FUNCTION__); }
-    public function logout(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
-    public function reboot(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
-    public function me(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
-    public function checkPhone(string $uid, string $token, string $phone): array { $this->unsupported(__FUNCTION__); }
-    public function subscribe(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
-    public function unsubscribe(string $uid, string $token): array { $this->unsupported(__FUNCTION__); }
-    public function getParticipants(string $uid, string $token, string $phone): array { return []; }
+
+    public function status(string $uid, string $token): never
+    {
+        $this->unsupported(__FUNCTION__);
+    }
+
+    public function qrCode(string $uid, string $token): never
+    {
+        $this->unsupported(__FUNCTION__);
+    }
+
+    public function logout(string $uid, string $token): never
+    {
+        $this->unsupported(__FUNCTION__);
+    }
+
+    public function reboot(string $uid, string $token): never
+    {
+        $this->unsupported(__FUNCTION__);
+    }
+
+    public function me(string $uid, string $token): never
+    {
+        $this->unsupported(__FUNCTION__);
+    }
+
+    public function checkPhone(string $uid, string $token, string $phone): never
+    {
+        $this->unsupported(__FUNCTION__);
+    }
+
+    public function subscribe(string $uid, string $token): never
+    {
+        $this->unsupported(__FUNCTION__);
+    }
+
+    public function unsubscribe(string $uid, string $token): never
+    {
+        $this->unsupported(__FUNCTION__);
+    }
+
+    public function getParticipants(string $uid, string $token, string $phone): never
+    {
+        $this->unsupported(__FUNCTION__);
+    }
 
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): MessageResultData
     {
@@ -180,7 +214,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return $res->json();
     }
 
-    public function sendPoll(string $uid, string $token, string $to, string $message, array $pollOptions, array $options = []): array
+    public function sendPoll(string $uid, string $token, string $to, string $message, array $pollOptions, array $options = []): never
     {
         $this->unsupported(__FUNCTION__);
     }
@@ -193,7 +227,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return $res->json();
     }
 
-    public function sendEvent(string $uid, string $token, string $toGroupPhone, array $event, array $options = []): array
+    public function sendEvent(string $uid, string $token, string $toGroupPhone, array $event, array $options = []): never
     {
         $this->unsupported(__FUNCTION__);
     }
@@ -230,12 +264,12 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         ][$ext] ?? 'invalid';
     }
 
-    public function contact(string $uid, string $token, string $phone): array
+    public function contact(string $uid, string $token, string $phone): never
     {
         $this->unsupported(__FUNCTION__);
     }
 
-    public function contacts(string $uid, string $token, array $options = []): array
+    public function contacts(string $uid, string $token, array $options = []): never
     {
         $this->unsupported(__FUNCTION__);
     }
