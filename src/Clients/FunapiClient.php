@@ -8,19 +8,21 @@ use Funnelchat\WapiGateway\Contracts\GroupsContract;
 use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\QueueContract;
 use Funnelchat\WapiGateway\Resources\Zapi\MessageResource;
-use Funnelchat\WapiGateway\Resources\Zapi\QrCodeResource;
 use Funnelchat\WapiGateway\Resources\Zapi\MeResource;
 use Funnelchat\WapiGateway\Resources\Zapi\LogOutResource;
 use Funnelchat\WapiGateway\Resources\Zapi\RebootResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CheckPhoneResource;
+use Funnelchat\WapiGateway\Data\InstanceStatusData;
+use Funnelchat\WapiGateway\Data\MessageResultData;
+use Funnelchat\WapiGateway\Data\QrCodeData;
+use Funnelchat\WapiGateway\Exceptions\WapiException;
 use Funnelchat\WapiGateway\Resources\Zapi\ContactResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupsResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CreateGroupResource;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Http\Client\ConnectionException;
 
-class FunapiClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract
+class FunapiClient extends AbstractWhatsAppClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract
 {
     // Status constants for compatibility with WAPI
     private const YOU_ARE_NOT_CONNECTED = 'You are not connected.';
@@ -29,14 +31,14 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
     private const PENDING_SUBSCRIPTION = 'To continue sending a message, you must subscribe to this instance again';
     private const INSTANCE_STATUSES = [self::YOU_ARE_ALREADY_CONNECTED, self::YOU_ARE_NOT_CONNECTED, self::YOU_NEED_TO_RESTORE_SESSION];
     private const QR_CODE_RETRIEVAL_ERROR_MESSAGE = 'Error retrieving QR code.';
+    private const PROVIDER = 'funapi';
 
-    private function buildUrl(string $uid, string $token, string $action): string
+    protected function getConfigPrefix(): string
     {
-        $baseUrl = rtrim(config('funapi.base_url'), '/');
-        return "{$baseUrl}/instances/{$uid}/token/{$token}/{$action}";
+        return 'funapi';
     }
 
-    public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
+    public function sendText(string $uid, string $token, string $to, string $text, array $options = []): MessageResultData
     {
         $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'send-text');
@@ -44,37 +46,19 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
 
-        $request = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
-            ->timeout(config('funapi.timeout', 120));
-
-        // Apply retry logic if enabled in options
-        if ($options['retry'] ?? false) {
-            $request = $request->retry(
-                config('funapi.max_attempts', 2),
-                config('funapi.retry_delay', 500),
-                function ($exception, $request) {
-                    // Don't retry on timeout (prevents duplicates)
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
-                        str_contains($exception->getMessage(), 'cURL error 28')) {
-                        return false;
-                    }
-                    // Only retry on ConnectionException
-                    return $exception instanceof ConnectionException;
-                },
-                false
-            );
-        }
-
-        $res = $request->post($url, $payload);
+        $res = $this->makeAuthenticatedRequest('post', $url, $payload, [
+            'headers' => $this->defaultHeaders(),
+            'retry' => $options['retry'] ?? false,
+        ]);
 
         if ($res->failed() || $res->json('error')) {
             $error = $this->formatError($res->json('error', 'error'));
             $this->logRequest('sendText', $uid, ['error' => $error, 'phone' => $to], $startTime, $res);
-            return ['error' => $error];
+            throw new WapiException($error, self::PROVIDER, rawError: $res->json());
         }
 
         $this->logRequest('sendText', $uid, ['phone' => $to, 'has_retry' => $options['retry'] ?? false], $startTime, $res);
-        return MessageResource::make($res->json());
+        return MessageResultData::fromFunapi($res->json());
     }
 
     public function create(int $userId, int $deviceId): array
@@ -106,67 +90,68 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return ['uid' => $res->json('id'), 'token' => $res->json('token')];
     }
 
-    public function status(string $uid, string $token): array
+    public function status(string $uid, string $token): InstanceStatusData
     {
         $url = $this->buildUrl($uid, $token, 'status');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
+        $res = Http::withHeaders($this->defaultHeaders())->get($url);
 
-        // Handle failures - check for PENDING_SUBSCRIPTION special case
         if ($res->failed()) {
             $error = $res->json('error');
 
-            // Special handling for PENDING_SUBSCRIPTION
             if ($error === self::PENDING_SUBSCRIPTION) {
-                return ['accountStatus' => $this->formatError(self::PENDING_SUBSCRIPTION)];
+                return new InstanceStatusData(
+                    connected: false,
+                    accountStatus: $this->formatError(self::PENDING_SUBSCRIPTION),
+                    qrCode: null,
+                    phone: null,
+                    provider: self::PROVIDER,
+                );
             }
 
-            // If error exists and it's not a recognized instance status, return error
-            if ($error && !in_array($error, self::INSTANCE_STATUSES)) {
-                return ['error' => $this->formatError($error)];
-            }
+            throw new WapiException($this->formatError($error ?? 'status_failed'), self::PROVIDER, rawError: $res->json());
         }
 
         $data = $res->json();
-
-        // ALWAYS add accountStatus field (WAPI compatibility)
         $accountStatus = 'authenticated';
-        $qrCode = '';
+        $qrCodeValue = null;
 
-        // Special handling for "You are not connected" or "You need to restore the session"
         if (isset($data['error']) && in_array($data['error'], [self::YOU_ARE_NOT_CONNECTED, self::YOU_NEED_TO_RESTORE_SESSION])) {
             $accountStatus = 'got qr code';
-
-            // MAKE SECOND API CALL to get QR code automatically
             $qrUrl = $this->buildUrl($uid, $token, 'qr-code/image');
-            $qrRes = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($qrUrl);
+            $qrRes = Http::withHeaders($this->defaultHeaders())->get($qrUrl);
 
             if ($qrRes->failed() || $qrRes->json('error')) {
-                return ['error' => self::QR_CODE_RETRIEVAL_ERROR_MESSAGE];
+                throw new WapiException(self::QR_CODE_RETRIEVAL_ERROR_MESSAGE, self::PROVIDER, rawError: $qrRes->json());
             }
 
-            // Funapi returns "image" instead of "value"
             $qrImage = $qrRes->json('image') ?? $qrRes->json('value');
-            
             if (!$qrImage) {
-                return ['error' => self::QR_CODE_RETRIEVAL_ERROR_MESSAGE];
+                throw new WapiException(self::QR_CODE_RETRIEVAL_ERROR_MESSAGE, self::PROVIDER, rawError: $qrRes->json());
             }
 
-            $qrCode = $qrImage;
+            $qrCodeValue = $qrImage;
         }
 
-        // Return ONLY the fields that WAPI original returns (StatusResource)
-        return [
-            'accountStatus' => $accountStatus,
-            'qrCode' => $qrCode,
-        ];
+        return new InstanceStatusData(
+            connected: $accountStatus === 'authenticated',
+            accountStatus: $accountStatus,
+            qrCode: $qrCodeValue ? new QrCodeData($qrCodeValue, null, null) : null,
+            phone: $data['device']['phone'] ?? null,
+            provider: self::PROVIDER,
+        );
     }
 
-    public function qrCode(string $uid, string $token): array
+    public function qrCode(string $uid, string $token): QrCodeData
     {
         $url = $this->buildUrl($uid, $token, 'qr-code/image');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return QrCodeResource::make($res->json());
+        $res = Http::withHeaders($this->defaultHeaders())->get($url);
+        if ($res->failed() || $res->json('error')) {
+            throw new WapiException($this->formatError($res->json('error', 'error')), self::PROVIDER, rawError: $res->json());
+        }
+
+        $payload = $res->json();
+        $value = $payload['image'] ?? $payload['value'] ?? null;
+        return new QrCodeData($value, $payload['url'] ?? null, $payload['expiresIn'] ?? $payload['expiration'] ?? null);
     }
 
     public function logout(string $uid, string $token): array
@@ -229,12 +214,14 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return $res->json('participants') ?? [];
     }
 
-    public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
+    public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): MessageResultData
     {
         $startTime = microtime(true);
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $action = $this->mapAction($ext);
-        if ($action === 'invalid') return ['error' => 'Invalid file extension'];
+        if ($action === 'invalid') {
+            throw new WapiException('invalid_file_extension', self::PROVIDER);
+        }
         // Funapi uses endpoints WITHOUT file type suffix: /send-image, /send-document (not /send-document/pdf)
         $attr = $this->mapAttr($ext);
         $params = ['phone' => $to, $attr => $fileUrl];
@@ -255,28 +242,10 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
         $url = $this->buildUrl($uid, $token, $action);
 
-        $request = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
-            ->timeout(config('funapi.timeout', 120));
-
-        // Apply retry logic if enabled in options
-        if ($options['retry'] ?? false) {
-            $request = $request->retry(
-                config('funapi.max_attempts', 2),
-                config('funapi.retry_delay', 500),
-                function ($exception, $request) {
-                    // Don't retry on timeout (prevents duplicates)
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
-                        str_contains($exception->getMessage(), 'cURL error 28')) {
-                        return false;
-                    }
-                    // Only retry on ConnectionException
-                    return $exception instanceof ConnectionException;
-                },
-                false
-            );
-        }
-
-        $res = $request->post($url, $params);
+        $res = $this->makeAuthenticatedRequest('post', $url, $params, [
+            'headers' => $this->defaultHeaders(),
+            'retry' => $options['retry'] ?? false,
+        ]);
 
         $context = [
             'phone' => $to,
@@ -290,11 +259,11 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
             $error = $this->formatError($res->json('error', 'error'));
             $context['error'] = $error;
             $this->logRequest('sendFile', $uid, $context, $startTime, $res);
-            return ['error' => $error];
+            throw new WapiException($error, self::PROVIDER, rawError: $res->json());
         }
 
         $this->logRequest('sendFile', $uid, $context, $startTime, $res);
-        return MessageResource::make($res->json());
+        return MessageResultData::fromFunapi($res->json());
     }
 
     public function sendLocation(string $uid, string $token, string $to, float $lat, float $lng, array $options = []): array
@@ -580,46 +549,7 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return ['success' => true];
     }
 
-    /**
-     * Log request with performance metrics
-     *
-     * @param string $method The method name being executed
-     * @param string $uid Instance UID
-     * @param array $context Additional context data
-     * @param float|null $startTime Start time for duration calculation
-     * @param mixed $response Response object or data
-     * @return void
-     */
-    private function logRequest(string $method, string $uid, array $context = [], ?float $startTime = null, $response = null): void
-    {
-        $logData = [
-            'method' => $method,
-            'instance_uid' => $uid,
-        ];
-
-        // Add request duration if start time provided
-        if ($startTime !== null) {
-            $logData['request_time_ms'] = (int)((microtime(true) - $startTime) * 1000);
-        }
-
-        // Add response status if available
-        if ($response && method_exists($response, 'status')) {
-            $logData['status_code'] = $response->status();
-            $logData['success'] = $response->successful();
-        }
-
-        // Merge additional context
-        $logData = array_merge($logData, $context);
-
-        // Log at appropriate level
-        if (isset($context['error'])) {
-            logger()->error("wapi-gateway.funapi.{$method}.error", $logData);
-        } else {
-            logger()->info("wapi-gateway.funapi.{$method}", $logData);
-        }
-    }
-
-    private function formatError(string $error): string
+    protected function mapErrorCodes(string $error): string
     {
         return match ($error) {
             'Instance not found' => 'instance_not_found',
@@ -632,6 +562,11 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
             'Phone not exists', 'Phone is wrong', 'Invalid phone' => 'phone_not_exists',
             default => $error,
         };
+    }
+
+    private function defaultHeaders(): array
+    {
+        return ['Client-Token' => config('funapi.client_token')];
     }
 
     public function showQueue(string $uid, string $token, array $options = []): array

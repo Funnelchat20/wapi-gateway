@@ -2,6 +2,11 @@
 
 namespace Funnelchat\WapiGateway\Gateway;
 
+use Funnelchat\WapiGateway\Contracts\ContactsContract;
+use Funnelchat\WapiGateway\Contracts\GroupsContract;
+use Funnelchat\WapiGateway\Contracts\InstancesContract;
+use Funnelchat\WapiGateway\Contracts\MessagesContract;
+use Funnelchat\WapiGateway\Contracts\QueueContract;
 use Funnelchat\WapiGateway\Enums\ProviderEnum;
 use Funnelchat\WapiGateway\Clients\ZApiClient;
 use Funnelchat\WapiGateway\Clients\UazapiClient;
@@ -18,7 +23,7 @@ class GatewayManager
     ) {
     }
 
-    public function messages(ProviderEnum $provider): object
+    public function messages(ProviderEnum $provider): MessagesContract
     {
         return match ($provider) {
             ProviderEnum::ZApi => $this->zapi,
@@ -28,7 +33,7 @@ class GatewayManager
         };
     }
 
-    public function instances(ProviderEnum $provider): object
+    public function instances(ProviderEnum $provider): InstancesContract
     {
         return match ($provider) {
             ProviderEnum::ZApi => $this->zapi,
@@ -38,7 +43,7 @@ class GatewayManager
         };
     }
 
-    public function groups(ProviderEnum $provider): object
+    public function groups(ProviderEnum $provider): GroupsContract
     {
         return match ($provider) {
             ProviderEnum::ZApi => $this->zapi,
@@ -48,7 +53,7 @@ class GatewayManager
         };
     }
 
-    public function contacts(ProviderEnum $provider): object
+    public function contacts(ProviderEnum $provider): ContactsContract
     {
         return match ($provider) {
             ProviderEnum::ZApi => $this->zapi,
@@ -63,7 +68,7 @@ class GatewayManager
         return $this->meta;
     }
 
-    public function queue(ProviderEnum $provider): object
+    public function queue(ProviderEnum $provider): QueueContract
     {
         return match ($provider) {
             ProviderEnum::ZApi => $this->zapi,

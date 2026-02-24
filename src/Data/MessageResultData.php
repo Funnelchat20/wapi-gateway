@@ -2,19 +2,27 @@
 
 namespace Funnelchat\WapiGateway\Data;
 
+/**
+ * Immutable DTO for WhatsApp send results.
+ */
 class MessageResultData
 {
     public function __construct(
-        public bool $sent,
-        public string $id = '',
-        public string $message = '',
-        public string $queueNumber = ''
+        public readonly bool $sent,
+        public readonly string $id = '',
+        public readonly string $message = '',
+        public readonly string $queueNumber = ''
     ) {
     }
 
     public static function fromZapi(array $payload): self
     {
         return new self(isset($payload['messageId']), $payload['messageId'] ?? '', '', '');
+    }
+
+    public static function fromFunapi(array $payload): self
+    {
+        return self::fromZapi($payload);
     }
 
     public static function fromMeta(array $payload): self

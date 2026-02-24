@@ -8,68 +8,56 @@ use Funnelchat\WapiGateway\Contracts\GroupsContract;
 use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\QueueContract;
 use Funnelchat\WapiGateway\Resources\Zapi\MessageResource;
-use Funnelchat\WapiGateway\Resources\Zapi\QrCodeResource;
 use Funnelchat\WapiGateway\Resources\Zapi\MeResource;
 use Funnelchat\WapiGateway\Resources\Zapi\LogOutResource;
 use Funnelchat\WapiGateway\Resources\Zapi\RebootResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CheckPhoneResource;
+use Funnelchat\WapiGateway\Data\InstanceStatusData;
+use Funnelchat\WapiGateway\Data\MessageResultData;
+use Funnelchat\WapiGateway\Data\QrCodeData;
+use Funnelchat\WapiGateway\Exceptions\WapiException;
 use Funnelchat\WapiGateway\Resources\Zapi\ContactResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupsResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CreateGroupResource;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Http\Client\ConnectionException;
 
-class ZApiClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract
+class ZApiClient extends AbstractWhatsAppClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract
 {
-    private const BASE = 'https://api.z-api.io/instances/UID/token/TOKEN/ACTION';
-
     // Status constants for compatibility with WAPI
     private const YOU_ARE_NOT_CONNECTED = 'You are not connected.';
     private const YOU_ARE_ALREADY_CONNECTED = 'You are already connected.';
     private const PENDING_SUBSCRIPTION = 'To continue sending a message, you must subscribe to this instance again';
     private const INSTANCE_STATUSES = [self::YOU_ARE_ALREADY_CONNECTED, self::YOU_ARE_NOT_CONNECTED];
     private const QR_CODE_RETRIEVAL_ERROR_MESSAGE = 'Error retrieving QR code.';
+    private const PROVIDER = 'zapi';
 
-    public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
+    protected function getConfigPrefix(): string
+    {
+        return 'zapi';
+    }
+
+    public function sendText(string $uid, string $token, string $to, string $text, array $options = []): MessageResultData
     {
         $startTime = microtime(true);
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-text'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'send-text');
         $payload = ['phone' => $to, 'message' => $text];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
 
-        $request = Http::withHeaders(['Client-Token' => config('zapi.client_token')])
-            ->timeout(config('zapi.timeout', 120));
-
-        // Apply retry logic if enabled in options
-        if ($options['retry'] ?? false) {
-            $request = $request->retry(
-                config('zapi.max_attempts', 2),
-                config('zapi.retry_delay', 500),
-                function ($exception, $request) {
-                    // Don't retry on timeout (prevents duplicates)
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
-                        str_contains($exception->getMessage(), 'cURL error 28')) {
-                        return false;
-                    }
-                    // Only retry on ConnectionException
-                    return $exception instanceof ConnectionException;
-                },
-                false
-            );
-        }
-
-        $res = $request->post($url, $payload);
+        $res = $this->makeAuthenticatedRequest('post', $url, $payload, [
+            'headers' => $this->defaultHeaders(),
+            'retry' => $options['retry'] ?? false,
+        ]);
 
         if ($res->failed() || $res->json('error')) {
             $error = $this->formatError($res->json('error', 'error'));
             $this->logRequest('sendText', $uid, ['error' => $error, 'phone' => $to], $startTime, $res);
-            return ['error' => $error];
+            throw new WapiException($error, self::PROVIDER, rawError: $res->json());
         }
 
         $this->logRequest('sendText', $uid, ['phone' => $to, 'has_retry' => $options['retry'] ?? false], $startTime, $res);
-        return MessageResource::make($res->json());
+        return MessageResultData::fromZapi($res->json());
     }
 
     public function create(int $userId, int $deviceId): array
@@ -101,69 +89,70 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return ['uid' => $res->json('id'), 'token' => $res->json('token')];
     }
 
-    public function status(string $uid, string $token): array
+    public function status(string $uid, string $token): InstanceStatusData
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'status'], self::BASE);
-        $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url);
+        $url = $this->buildUrl($uid, $token, 'status');
+        $res = Http::withHeaders($this->defaultHeaders())->get($url);
 
-        // Handle failures - check for PENDING_SUBSCRIPTION special case
         if ($res->failed()) {
             $error = $res->json('error');
 
-            // Special handling for PENDING_SUBSCRIPTION
             if ($error === self::PENDING_SUBSCRIPTION) {
-                return ['accountStatus' => $this->formatError(self::PENDING_SUBSCRIPTION)];
+                return new InstanceStatusData(
+                    connected: false,
+                    accountStatus: $this->formatError(self::PENDING_SUBSCRIPTION),
+                    qrCode: null,
+                    phone: null,
+                    provider: self::PROVIDER,
+                );
             }
 
-            // If error exists and it's not a recognized instance status, return error
-            if ($error && !in_array($error, self::INSTANCE_STATUSES)) {
-                return ['error' => $this->formatError($error)];
-            }
+            throw new WapiException($this->formatError($error ?? 'status_failed'), self::PROVIDER, rawError: $res->json());
         }
 
         $data = $res->json();
-
-        // ALWAYS add accountStatus field (WAPI compatibility)
         $accountStatus = 'authenticated';
-        $qrCode = '';
+        $qrCodeValue = null;
 
-        // Special handling for "You are not connected"
         if (isset($data['error']) && $data['error'] === self::YOU_ARE_NOT_CONNECTED) {
             $accountStatus = 'got qr code';
-
-            // MAKE SECOND API CALL to get QR code automatically
-            $qrUrl = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'qr-code/image'], self::BASE);
-            $qrRes = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($qrUrl);
+            $qrUrl = $this->buildUrl($uid, $token, 'qr-code/image');
+            $qrRes = Http::withHeaders($this->defaultHeaders())->get($qrUrl);
 
             if ($qrRes->failed() || $qrRes->json('error')) {
-                return ['error' => self::QR_CODE_RETRIEVAL_ERROR_MESSAGE];
+                throw new WapiException(self::QR_CODE_RETRIEVAL_ERROR_MESSAGE, self::PROVIDER, rawError: $qrRes->json());
             }
 
-            if (!isset($qrRes->json()['value'])) {
-                return ['error' => self::QR_CODE_RETRIEVAL_ERROR_MESSAGE];
+            $qrCodeValue = $qrRes->json('value');
+            if (!$qrCodeValue) {
+                throw new WapiException(self::QR_CODE_RETRIEVAL_ERROR_MESSAGE, self::PROVIDER, rawError: $qrRes->json());
             }
-
-            $qrCode = $qrRes->json()['value'];
         }
 
-        // Return ONLY the fields that WAPI original returns (StatusResource)
-        return [
-            'accountStatus' => $accountStatus,
-            'qrCode' => $qrCode,
-        ];
+        return new InstanceStatusData(
+            connected: $accountStatus === 'authenticated',
+            accountStatus: $accountStatus,
+            qrCode: $qrCodeValue ? new QrCodeData($qrCodeValue, null, null) : null,
+            phone: $data['device']['phone'] ?? null,
+            provider: self::PROVIDER,
+        );
     }
 
-    public function qrCode(string $uid, string $token): array
+    public function qrCode(string $uid, string $token): QrCodeData
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'qr-code/image'], self::BASE);
-        $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return QrCodeResource::make($res->json());
+        $url = $this->buildUrl($uid, $token, 'qr-code/image');
+        $res = Http::withHeaders($this->defaultHeaders())->get($url);
+        if ($res->failed() || $res->json('error')) {
+            throw new WapiException($this->formatError($res->json('error', 'error')), self::PROVIDER, rawError: $res->json());
+        }
+
+        $payload = $res->json();
+        return new QrCodeData($payload['value'] ?? null, $payload['url'] ?? null, $payload['expiresIn'] ?? $payload['expiration'] ?? null);
     }
 
     public function logout(string $uid, string $token): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'disconnect'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'disconnect');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return LogOutResource::make($res->json());
@@ -171,7 +160,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function reboot(string $uid, string $token): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'restart'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'restart');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return RebootResource::make($res->json());
@@ -179,7 +168,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function me(string $uid, string $token): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'device'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'device');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return MeResource::make($res->json());
@@ -187,7 +176,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function checkPhone(string $uid, string $token, string $phone): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'phone-exists/' . $phone], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'phone-exists/' . $phone);
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url);
         if ($res->failed()) return ['error' => $this->formatError($res->json('error', 'error'))];
         return CheckPhoneResource::make($res->json());
@@ -205,7 +194,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     public function unsubscribe(string $uid, string $token): array
     {
         $instanceUid = explode('-', $uid)[0] ?? $uid;
-        $disconnectUrl = str_replace(['UID', 'TOKEN', 'ACTION'], [$instanceUid, $token, 'disconnect'], self::BASE);
+        $disconnectUrl = $this->buildUrl($instanceUid, $token, 'disconnect');
         $disc = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($disconnectUrl);
         if ($disc->failed() || $disc->json('error')) return ['error' => $disc->json('error') ?? 'disconnect_failed'];
         $url = str_replace(['UID', 'TOKEN'], [$instanceUid, $token], config('zapi.unsubscription_url'));
@@ -216,18 +205,20 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function getParticipants(string $uid, string $token, string $phone): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'light-group-metadata/' . $phone], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'light-group-metadata/' . $phone);
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url);
         if ($res->failed() || $res->json('error') || $res->json('success') === false) return [];
         return $res->json('participants') ?? [];
     }
 
-    public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
+    public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): MessageResultData
     {
         $startTime = microtime(true);
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $action = $this->mapAction($ext);
-        if ($action === 'invalid') return ['error' => 'Invalid file extension'];
+        if ($action === 'invalid') {
+            throw new WapiException('invalid_file_extension', self::PROVIDER);
+        }
         if ($action === 'send-document') $action = $action . '/' . $ext;
         $attr = $this->mapAttr($ext);
         $params = ['phone' => $to, $attr => $fileUrl];
@@ -246,30 +237,12 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
             $params['async'] = (bool) $options['async'];
         }
 
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, $action], self::BASE);
+        $url = $this->buildUrl($uid, $token, $action);
 
-        $request = Http::withHeaders(['Client-Token' => config('zapi.client_token')])
-            ->timeout(config('zapi.timeout', 120));
-
-        // Apply retry logic if enabled in options
-        if ($options['retry'] ?? false) {
-            $request = $request->retry(
-                config('zapi.max_attempts', 2),
-                config('zapi.retry_delay', 500),
-                function ($exception, $request) {
-                    // Don't retry on timeout (prevents duplicates)
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
-                        str_contains($exception->getMessage(), 'cURL error 28')) {
-                        return false;
-                    }
-                    // Only retry on ConnectionException
-                    return $exception instanceof ConnectionException;
-                },
-                false
-            );
-        }
-
-        $res = $request->post($url, $params);
+        $res = $this->makeAuthenticatedRequest('post', $url, $params, [
+            'headers' => $this->defaultHeaders(),
+            'retry' => $options['retry'] ?? false,
+        ]);
 
         $context = [
             'phone' => $to,
@@ -283,11 +256,11 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
             $error = $this->formatError($res->json('error', 'error'));
             $context['error'] = $error;
             $this->logRequest('sendFile', $uid, $context, $startTime, $res);
-            return ['error' => $error];
+            throw new WapiException($error, self::PROVIDER, rawError: $res->json());
         }
 
         $this->logRequest('sendFile', $uid, $context, $startTime, $res);
-        return MessageResource::make($res->json());
+        return MessageResultData::fromZapi($res->json());
     }
 
     public function sendLocation(string $uid, string $token, string $to, float $lat, float $lng, array $options = []): array
@@ -298,7 +271,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-location'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'send-location');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(120)->post($url, $params);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error', 'error'))];
@@ -310,28 +283,12 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     {
         $params = ['phone' => $to, 'message' => $message, 'buttonList' => ['buttons' => $buttons]];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-button-list'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'send-button-list');
 
-        $request = Http::withHeaders(['Client-Token' => config('zapi.client_token')])
-            ->timeout(config('zapi.timeout', 120));
-
-        // Apply retry logic if enabled in options
-        if ($options['retry'] ?? false) {
-            $request = $request->retry(
-                config('zapi.max_attempts', 2),
-                config('zapi.retry_delay', 500),
-                function ($exception, $request) {
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
-                        str_contains($exception->getMessage(), 'cURL error 28')) {
-                        return false;
-                    }
-                    return $exception instanceof ConnectionException;
-                },
-                false
-            );
-        }
-
-        $res = $request->post($url, $params);
+        $res = $this->makeAuthenticatedRequest('post', $url, $params, [
+            'headers' => $this->defaultHeaders(),
+            'retry' => $options['retry'] ?? false,
+        ]);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error', 'error'))];
         }
@@ -342,7 +299,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     {
         $params = ['phone' => $to, 'message' => $message, 'buttonActions' => [['type' => 'URL', 'url' => $url, 'label' => $label]]];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-button-actions'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'send-button-actions');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(120)->post($url, $params);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error', 'error'))];
@@ -354,7 +311,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     {
         $params = ['phone' => $to, 'message' => $message, 'optionList' => ['options' => $optionsList, 'buttonLabel' => $buttonLabel]];
         if (isset($extra['delayMessage'])) $params['delayMessage'] = (int) $extra['delayMessage'];
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-option-list'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'send-option-list');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(120)->post($url, $params);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error', 'error'))];
@@ -367,28 +324,12 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $params = ['phone' => $to, 'message' => $message, 'poll' => array_map(fn($o) => ['name' => $o], $pollOptions)];
         if (isset($options['pollMaxOptions'])) $params['pollMaxOptions'] = (int) $options['pollMaxOptions'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-poll'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'send-poll');
 
-        $request = Http::withHeaders(['Client-Token' => config('zapi.client_token')])
-            ->timeout(config('zapi.timeout', 120));
-
-        // Apply retry logic if enabled in options
-        if ($options['retry'] ?? false) {
-            $request = $request->retry(
-                config('zapi.max_attempts', 2),
-                config('zapi.retry_delay', 500),
-                function ($exception, $request) {
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
-                        str_contains($exception->getMessage(), 'cURL error 28')) {
-                        return false;
-                    }
-                    return $exception instanceof ConnectionException;
-                },
-                false
-            );
-        }
-
-        $res = $request->post($url, $params);
+        $res = $this->makeAuthenticatedRequest('post', $url, $params, [
+            'headers' => $this->defaultHeaders(),
+            'retry' => $options['retry'] ?? false,
+        ]);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error', 'error'))];
         }
@@ -404,7 +345,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-link'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'send-link');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(120)->post($url, $params);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error', 'error'))];
@@ -415,7 +356,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     public function sendEvent(string $uid, string $token, string $toGroupPhone, array $event, array $options = []): array
     {
         $params = ['phone' => $toGroupPhone, 'event' => $event];
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-event'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'send-event');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(60)->post($url, $params);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
@@ -423,7 +364,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-message'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'send-message');
         $payload = ['phone' => $to, 'message' => '[TEMPLATE] ' . $name];
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(60)->post($url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
@@ -454,7 +395,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function groups(string $uid, string $token, array $options = []): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'groups'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'groups');
         $params = ['page' => $options['page'] ?? 1, 'pageSize' => $options['pageSize'] ?? 299];
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url, $params);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
@@ -464,7 +405,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function adGroups(string $uid, string $token, array $options = []): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'groups'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'groups');
         $params = ['page' => $options['page'] ?? 1, 'pageSize' => $options['pageSize'] ?? 999];
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url, $params);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
@@ -474,10 +415,10 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function group(string $uid, string $token, string $id): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'group-metadata/' . $id . '-group'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'group-metadata/' . $id . '-group');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url);
         if ($res->failed() || $res->json('error') || $res->json('success') === false) return ['error' => $this->formatError($res->json('error', $res->json('message', 'error')))];
-        $image = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get(str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'chats/' . $id . '-group'], self::BASE))->json('profileThumbnail', '');
+        $image = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($this->buildUrl($uid, $token, 'chats/' . $id . '-group'))->json('profileThumbnail', '');
         $data = $res->json();
         $data['image'] = $image;
         return GroupResource::make($data);
@@ -485,23 +426,23 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function createGroup(string $uid, string $token, string $name, array $participants, array $options = []): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'create-group'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'create-group');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post($url, ['groupName' => $name, 'phones' => $participants, 'autoInvite' => true]);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         $data = $res->json();
         if (!isset($data['phone'])) return ['error' => 'group_phone_missing'];
         if (!empty($options['admins'])) {
-            Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post(str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'add-admin'], self::BASE), ['groupId' => $data['phone'], 'phones' => $options['admins']]);
+            Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post($this->buildUrl($uid, $token, 'add-admin'), ['groupId' => $data['phone'], 'phones' => $options['admins']]);
         }
         if (!empty($options['photo'])) {
-            Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post(str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'update-group-photo'], self::BASE), ['groupId' => $data['phone'], 'groupPhoto' => $options['photo']]);
+            Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post($this->buildUrl($uid, $token, 'update-group-photo'), ['groupId' => $data['phone'], 'groupPhoto' => $options['photo']]);
         }
         return CreateGroupResource::make($data);
     }
 
     public function updateGroupName(string $uid, string $token, string $id, string $name): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'update-group-name'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'update-group-name');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post($url, ['groupId' => $id, 'groupName' => $name]);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
@@ -509,7 +450,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function updateGroupDescription(string $uid, string $token, string $id, string $description): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'update-group-description'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'update-group-description');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post($url, ['groupId' => $id . '-group', 'groupDescription' => $description]);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
@@ -517,7 +458,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function updateGroupSettings(string $uid, string $token, string $id, bool $adminOnlyMessage, bool $adminOnlySettings): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'update-group-settings'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'update-group-settings');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post($url, ['phone' => $id . '-group', 'adminOnlyMessage' => $adminOnlyMessage, 'adminOnlySettings' => $adminOnlySettings]);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
@@ -525,7 +466,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function updateGroupPhoto(string $uid, string $token, string $id, string $photoUrl): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'update-group-photo'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'update-group-photo');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post($url, ['groupId' => $id, 'groupPhoto' => $photoUrl]);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
@@ -533,7 +474,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function addParticipants(string $uid, string $token, string $id, array $phones): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'add-participant'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'add-participant');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post($url, ['autoInvite' => true, 'groupId' => $id, 'phones' => $phones]);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
@@ -541,7 +482,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function addAdmins(string $uid, string $token, string $id, array $phones): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'add-admin'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'add-admin');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post($url, ['groupId' => $id, 'phones' => $phones]);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
@@ -549,7 +490,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function removeParticipants(string $uid, string $token, string $id, array $phones): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'remove-participant'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'remove-participant');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post($url, ['groupId' => $id, 'phones' => $phones]);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
@@ -557,7 +498,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function removeAdmins(string $uid, string $token, string $id, array $phones): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'remove-admin'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'remove-admin');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post($url, ['groupId' => $id, 'phones' => $phones]);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
@@ -565,7 +506,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function leaveGroup(string $uid, string $token, string $id): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'leave-group'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'leave-group');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post($url, ['groupId' => $id . '-group']);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
@@ -573,7 +514,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function contact(string $uid, string $token, string $phone): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'contacts/' . $phone], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'contacts/' . $phone);
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('message') ?? $res->json('error', 'error'))];
         return ContactResource::make($res->json());
@@ -581,7 +522,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function contacts(string $uid, string $token, array $options = []): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'contacts'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'contacts');
         $params = ['page' => $options['page'] ?? 1, 'pageSize' => $options['pageSize'] ?? 50];
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url, $params);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('message') ?? $res->json('error', 'error'))];
@@ -590,7 +531,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function sendContact(string $uid, string $token, string $to, string $contactName, string $contactPhone, array $options = []): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-contact'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'send-contact');
         $payload = ['phone' => $to, 'contactName' => $contactName, 'contactPhone' => $contactPhone];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post($url, $payload);
@@ -600,7 +541,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function communities(string $uid, string $token, array $options = []): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'communities'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'communities');
         $params = ['page' => $options['page'] ?? 1, 'pageSize' => $options['pageSize'] ?? 10];
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url, $params);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
@@ -609,7 +550,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function communitiesMetadata(string $uid, string $token, string $id): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'communities-metadata/' . $id], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'communities-metadata/' . $id);
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
@@ -617,17 +558,17 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function community(string $uid, string $token, array $data): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'communities'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'communities');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post($url, ['name' => $data['name'], 'description' => $data['description'] ?? null]);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         $communityId = $res->json('id');
-        Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post(str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'communities/settings'], self::BASE), ['communityId' => $communityId, 'whoCanAddNewGroups' => 'admins']);
+        Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post($this->buildUrl($uid, $token, 'communities/settings'), ['communityId' => $communityId, 'whoCanAddNewGroups' => 'admins']);
         return $res->json();
     }
 
     public function groupInvitationMetadata(string $uid, string $token, string $url): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'group-invitation-metadata'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'group-invitation-metadata');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url, ['url' => $url]);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('message') ?? $res->json('error', 'error'))];
         return $res->json();
@@ -635,7 +576,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function chats(string $uid, string $token, array $options = []): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'chats'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'chats');
         $params = [];
         if (isset($options['page'])) $params['page'] = (int) $options['page'];
         if (isset($options['pageSize'])) $params['pageSize'] = (int) $options['pageSize'];
@@ -646,7 +587,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function deleteChat(string $uid, string $token, string $phone): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'modify-chat'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'modify-chat');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->post($url, ['phone' => $phone, 'action' => 'delete']);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
@@ -654,7 +595,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function deleteMessage(string $uid, string $token, string $messageId, string $phone, bool $owner): array
     {
-        $base = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'messages'], self::BASE);
+        $base = $this->buildUrl($uid, $token, 'messages');
         $query = http_build_query(['messageId' => $messageId, 'phone' => $phone]) . ($owner ? '&owner=true' : '');
         $url = $base . '?' . $query;
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(20)->delete($url);
@@ -662,46 +603,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return ['success' => true];
     }
 
-    /**
-     * Log request with performance metrics
-     *
-     * @param string $method The method name being executed
-     * @param string $uid Instance UID
-     * @param array $context Additional context data
-     * @param float|null $startTime Start time for duration calculation
-     * @param mixed $response Response object or data
-     * @return void
-     */
-    private function logRequest(string $method, string $uid, array $context = [], ?float $startTime = null, $response = null): void
-    {
-        $logData = [
-            'method' => $method,
-            'instance_uid' => $uid,
-        ];
-
-        // Add request duration if start time provided
-        if ($startTime !== null) {
-            $logData['request_time_ms'] = (int)((microtime(true) - $startTime) * 1000);
-        }
-
-        // Add response status if available
-        if ($response && method_exists($response, 'status')) {
-            $logData['status_code'] = $response->status();
-            $logData['success'] = $response->successful();
-        }
-
-        // Merge additional context
-        $logData = array_merge($logData, $context);
-
-        // Log at appropriate level
-        if (isset($context['error'])) {
-            logger()->error("wapi-gateway.zapi.{$method}.error", $logData);
-        } else {
-            logger()->info("wapi-gateway.zapi.{$method}", $logData);
-        }
-    }
-
-    private function formatError(string $error): string
+    protected function mapErrorCodes(string $error): string
     {
         return match ($error) {
             'Instance not found' => 'instance_not_found',
@@ -716,9 +618,14 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         };
     }
 
+    private function defaultHeaders(): array
+    {
+        return ['Client-Token' => config('zapi.client_token')];
+    }
+
     public function showQueue(string $uid, string $token, array $options = []): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'queue'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'queue');
         $params = ['page' => $options['page'] ?? 1, 'pageSize' => $options['pageSize'] ?? 499];
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url, $params);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
@@ -727,7 +634,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function queueCount(string $uid, string $token): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'queue/count'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'queue/count');
         $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['count' => $res->json('count')];
@@ -735,7 +642,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function deleteQueueMessage(string $uid, string $token, string $messageQueueUid): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'queue/' . $messageQueueUid], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'queue/' . $messageQueueUid);
         $res = Http::withHeaders(['accept' => 'application/json', 'client-token' => env('ZAPI_CLIENT_TOKEN', '')])->delete($url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
@@ -743,7 +650,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
     public function clearQueue(string $uid, string $token): array
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'queue'], self::BASE);
+        $url = $this->buildUrl($uid, $token, 'queue');
         $res = Http::withHeaders(['accept' => 'application/json', 'client-token' => env('ZAPI_CLIENT_TOKEN', '')])->delete($url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
@@ -776,7 +683,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
             $owner = $params['owner'] ?? false;
 
             // Build the URL with query parameters
-            $base = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'messages'], self::BASE);
+            $base = $this->buildUrl($uid, $token, 'messages');
             $query = http_build_query(['messageId' => $messageId, 'phone' => $phone]) . ($owner ? '&owner=true' : '');
             $url = $base . '?' . $query;
 

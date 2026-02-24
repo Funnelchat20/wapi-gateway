@@ -2,11 +2,14 @@
 
 namespace Funnelchat\WapiGateway\Contracts;
 
+use Funnelchat\WapiGateway\Data\InstanceStatusData;
+use Funnelchat\WapiGateway\Data\QrCodeData;
+
 interface InstancesContract
 {
     public function create(int $userId, int $deviceId): array;
-    public function status(string $uid, string $token): array;
-    public function qrCode(string $uid, string $token): array;
+    public function status(string $uid, string $token): InstanceStatusData;
+    public function qrCode(string $uid, string $token): QrCodeData;
     public function logout(string $uid, string $token): array;
     public function reboot(string $uid, string $token): array;
     public function me(string $uid, string $token): array;
