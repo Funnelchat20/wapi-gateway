@@ -664,6 +664,70 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return $res->json();
     }
 
+    public function createNewsletter(string $uid, string $token, string $name, string $description): array
+    {
+        return ['error' => 'Newsletter operations are not supported by UAZAPI provider'];
+    }
+
+    public function updateNewsletterName(string $uid, string $token, string $id, string $name): array
+    {
+        return ['error' => 'Newsletter operations are not supported by UAZAPI provider'];
+    }
+
+    public function updateNewsletterDescription(string $uid, string $token, string $id, string $description): array
+    {
+        return ['error' => 'Newsletter operations are not supported by UAZAPI provider'];
+    }
+
+    public function updateNewsletterPicture(string $uid, string $token, string $id, string $photoUrl): array
+    {
+        return ['error' => 'Newsletter operations are not supported by UAZAPI provider'];
+    }
+
+    public function newsletters(string $uid, string $token): array
+    {
+        return ['error' => 'Newsletter operations are not supported by UAZAPI provider'];
+    }
+
+    public function newsletterMetadata(string $uid, string $token, string $id): array
+    {
+        return ['error' => 'Newsletter operations are not supported by UAZAPI provider'];
+    }
+
+    public function groupInvitationLink(string $uid, string $token, string $groupId): array
+    {
+        return ['error' => 'groupInvitationLink is not supported by UAZAPI provider'];
+    }
+
+    public function lightGroupMetadata(string $uid, string $token, string $groupId): array
+    {
+        return $this->group($uid, $token, $groupId);
+    }
+
+    public function groupMetadata(string $uid, string $token, string $groupId): array
+    {
+        return $this->group($uid, $token, $groupId);
+    }
+
+    public function deleteMessagesConcurrently(string $uid, string $token, array $deleteRequests): array
+    {
+        $results = [];
+        foreach ($deleteRequests as $req) {
+            $results[$req['messageId']] = $this->deleteMessage($uid, $token, $req['messageId'], $req['phone'], $req['owner'] ?? false);
+        }
+        return $results;
+    }
+
+    public function pinMessage(string $uid, string $token, string $phone, string $messageId, int $duration): array
+    {
+        return ['error' => 'pinMessage is not supported by UAZAPI provider'];
+    }
+
+    public function addContacts(string $uid, string $token, array $contacts): array
+    {
+        return ['error' => 'addContacts is not supported by UAZAPI provider'];
+    }
+
     private function updateParticipants(string $token, string $groupjid, string $action, array $phones)
     {
         return Http::withHeaders(['token' => $token])

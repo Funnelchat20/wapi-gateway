@@ -1,6 +1,6 @@
 {
   "name": "funnelchat20/wapi-gateway",
-  "description": "WAPI Gateway: librería Composer para integrar ZApi, UAZAPI y Meta (sin webhooks)",
+  "description": "WAPI Gateway: librería Composer para integrar ZApi, UAZAPI, Funapi y Meta con webhooks automáticos",
   "type": "library",
   "license": "proprietary",
   "require": {

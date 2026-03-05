@@ -348,6 +348,94 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return ['error' => 'sendTemplate() is not yet available for Funapi provider. Development in progress.'];
     }
 
+    public function createNewsletter(string $uid, string $token, string $name, string $description): array
+    {
+        $url = $this->buildUrl($uid, $token, 'create-newsletter');
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->post($url, ['name' => $name, 'description' => $description]);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
+    public function updateNewsletterName(string $uid, string $token, string $id, string $name): array
+    {
+        $url = $this->buildUrl($uid, $token, 'update-newsletter-name');
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->put($url, ['id' => $id, 'name' => $name]);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
+    public function updateNewsletterDescription(string $uid, string $token, string $id, string $description): array
+    {
+        $url = $this->buildUrl($uid, $token, 'update-newsletter-description');
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->put($url, ['id' => $id, 'description' => $description]);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
+    public function updateNewsletterPicture(string $uid, string $token, string $id, string $photoUrl): array
+    {
+        $url = $this->buildUrl($uid, $token, 'update-newsletter-picture');
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->put($url, ['id' => $id, 'picture' => $photoUrl]);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
+    public function newsletters(string $uid, string $token): array
+    {
+        $url = $this->buildUrl($uid, $token, 'newsletter');
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 60))->get($url);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
+    public function newsletterMetadata(string $uid, string $token, string $id): array
+    {
+        $url = $this->buildUrl($uid, $token, 'newsletter/metadata/' . $id);
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 60))->get($url);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
+    public function groupInvitationLink(string $uid, string $token, string $groupId): array
+    {
+        $url = $this->buildUrl($uid, $token, 'group-invitation-link/' . $groupId . '-group');
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 60))->get($url);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
+    public function lightGroupMetadata(string $uid, string $token, string $groupId): array
+    {
+        $url = $this->buildUrl($uid, $token, 'light-group-metadata/' . $groupId . '-group');
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 60))->get($url);
+        if ($res->failed() || $res->json('error') || $res->json('success') === false) return ['error' => $this->formatError($res->json('error', $res->json('message', 'error')))];
+        return $res->json();
+    }
+
+    public function groupMetadata(string $uid, string $token, string $groupId): array
+    {
+        $url = $this->buildUrl($uid, $token, 'group-metadata/' . $groupId . '-group');
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->get($url);
+        if ($res->failed() || $res->json('error') || $res->json('success') === false) return ['error' => $this->formatError($res->json('error', $res->json('message', 'error')))];
+        return $res->json();
+    }
+
+    public function pinMessage(string $uid, string $token, string $phone, string $messageId, int $duration): array
+    {
+        $url = $this->buildUrl($uid, $token, 'pin-message');
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 60))->post($url, ['phone' => $phone, 'messageId' => $messageId, 'time' => $duration]);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
+    public function addContacts(string $uid, string $token, array $contacts): array
+    {
+        $url = $this->buildUrl($uid, $token, 'add-contacts');
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->post($url, ['contacts' => $contacts]);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
     private function mapAction(string $ext): string
     {
         return [

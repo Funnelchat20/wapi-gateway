@@ -9,7 +9,7 @@ SDK puro para integrar proveedores de WhatsApp soportados por Funnelchat: **Z-AP
 
 ## Requisitos
 - PHP ^8.2
-- Laravel ^11.0
+- Laravel ^11.0 | ^12.0
 
 ## Instalación
 
@@ -104,7 +104,6 @@ $status = WapiGateway::instances(ProviderEnum::ZApi)->status($uid, $token);
 | `sendText()` | ✅ | ✅ | ✅ | ✅ |
 | `sendFile()` | ✅ | ✅ | ✅ | ✅ |
 | `sendLocation()` | ✅ | ✅ | ✅ | ✅ |
-| `sendContact()` | ✅ | ✅ | ✅ | ✅ |
 | `sendButtons()` | ✅ | ✅ | ⚠️ | ✅ |
 | `sendButtonLink()` | ✅ | ✅ | ⚠️ | ✅ |
 | `sendOptionList()` | ✅ | ✅ | ⚠️ | ✅ |
@@ -112,6 +111,7 @@ $status = WapiGateway::instances(ProviderEnum::ZApi)->status($uid, $token);
 | `sendLink()` | ✅ | ✅ | ⚠️ | ✅ |
 | `sendEvent()` | ✅ | ✅ | ⚠️ | ✅ |
 | `sendTemplate()` | ✅ | ✅ | ⚠️ | ✅ |
+| `pinMessage()` | ✅ | ✅ | ⚠️ | ❌ |
 
 ### 🔧 Instancias
 
@@ -143,6 +143,39 @@ $status = WapiGateway::instances(ProviderEnum::ZApi)->status($uid, $token);
 | `removeParticipants()` | ✅ | ✅ | ✅ | ❌ |
 | `removeAdmins()` | ✅ | ✅ | ✅ | ❌ |
 | `leaveGroup()` | ✅ | ✅ | ✅ | ❌ |
+| `adGroups()` | ✅ | ✅ | ✅ | ❌ |
+| `groupInvitationMetadata()` | ✅ | ✅ | ✅ | ❌ |
+| `groupInvitationLink()` | ✅ | ✅ | ✅ | ❌ |
+| `lightGroupMetadata()` | ✅ | ✅ | ✅ | ❌ |
+| `groupMetadata()` | ✅ | ✅ | ✅ | ❌ |
+
+### 📇 Contactos
+
+| Método | Z-API | UAZAPI | Funapi | Meta |
+|--------|-------|--------|--------|------|
+| `contact()` | ✅ | ✅ | ✅ | ❌ |
+| `contacts()` | ✅ | ✅ | ✅ | ❌ |
+| `sendContact()` | ✅ | ✅ | ✅ | ✅ |
+| `addContacts()` | ✅ | ✅ | ✅ | ❌ |
+
+### 🏘️ Comunidades
+
+| Método | Z-API | UAZAPI | Funapi | Meta |
+|--------|-------|--------|--------|------|
+| `community()` | ✅ | ✅ | ⚠️ | ❌ |
+| `communities()` | ✅ | ✅ | ⚠️ | ❌ |
+| `communitiesMetadata()` | ✅ | ✅ | ⚠️ | ❌ |
+
+### 📢 Newsletters / Canales
+
+| Método | Z-API | UAZAPI | Funapi | Meta |
+|--------|-------|--------|--------|------|
+| `createNewsletter()` | ✅ | ✅ | ⚠️ | ❌ |
+| `updateNewsletterName()` | ✅ | ✅ | ⚠️ | ❌ |
+| `updateNewsletterDescription()` | ✅ | ✅ | ⚠️ | ❌ |
+| `updateNewsletterPicture()` | ✅ | ✅ | ⚠️ | ❌ |
+| `newsletters()` | ✅ | ✅ | ⚠️ | ❌ |
+| `newsletterMetadata()` | ✅ | ✅ | ⚠️ | ❌ |
 
 ### 📋 Cola de Mensajes
 
@@ -358,7 +391,7 @@ Los siguientes métodos retornan error descriptivo indicando que están en desar
 - `sendEvent()`
 - `sendTemplate()`
 
-### ✅ Totalmente Funcional (36/44 métodos)
+### ✅ Totalmente Funcional
 - Mensajería básica: texto, archivos, ubicación, contactos
 - Gestión de instancias completa
 - Operaciones de grupos completas
@@ -418,7 +451,16 @@ class WhatsAppController extends Controller
 
 ## Changelog
 
-### v0.2.0 - 2025-01-XX (En desarrollo)
+### v0.3.0 - 2025-XX-XX (En desarrollo)
+
+**Added:**
+- ✨ Soporte completo para Newsletters/Canales: `createNewsletter()`, `updateNewsletterName()`, `updateNewsletterDescription()`, `updateNewsletterPicture()`, `newsletters()`, `newsletterMetadata()`
+- ✨ Soporte para Comunidades: `community()`, `communities()`, `communitiesMetadata()`
+- ✨ Sección de Contactos: `contact()`, `contacts()`, `sendContact()`, `addContacts()`
+- ✨ Métodos de grupos: `adGroups()`, `groupInvitationMetadata()`, `groupInvitationLink()`, `lightGroupMetadata()`, `groupMetadata()`
+- ✨ Método `pinMessage()` en MessagesContract
+
+### v0.2.0 - 2025-01-XX
 
 **Added:**
 - ✨ Configuración automática de webhooks al crear instancias
@@ -461,7 +503,7 @@ class WhatsAppController extends Controller
 - [ ] Completar endpoints faltantes de Funapi (botones, listas, encuestas)
 - [ ] Tests automatizados para todos los proveedores
 - [ ] Documentación de DTOs y respuestas por operación
-- [ ] Soporte para webhooks (opcional)
+- [x] Soporte para webhooks (configuración automática implementada)
 - [ ] v1.0.0 - Release estable cuando todos los proveedores estén 100% completos
 
 ## Contribución

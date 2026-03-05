@@ -24,4 +24,14 @@ interface GroupsContract
     public function chats(string $uid, string $token, array $options = []): array;
     public function deleteChat(string $uid, string $token, string $phone): array;
     public function deleteMessage(string $uid, string $token, string $messageId, string $phone, bool $owner): array;
+    public function deleteMessagesConcurrently(string $uid, string $token, array $deleteRequests): array;
+    public function createNewsletter(string $uid, string $token, string $name, string $description): array;
+    public function updateNewsletterName(string $uid, string $token, string $id, string $name): array;
+    public function updateNewsletterDescription(string $uid, string $token, string $id, string $description): array;
+    public function updateNewsletterPicture(string $uid, string $token, string $id, string $photoUrl): array;
+    public function newsletters(string $uid, string $token): array;
+    public function newsletterMetadata(string $uid, string $token, string $id): array;
+    public function groupInvitationLink(string $uid, string $token, string $groupId): array;
+    public function lightGroupMetadata(string $uid, string $token, string $groupId): array;
+    public function groupMetadata(string $uid, string $token, string $groupId): array;
 }
