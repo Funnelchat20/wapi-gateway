@@ -3,10 +3,10 @@
 return [
     'token' => env('ZAPI_TOKEN'),
     'client_token' => env('ZAPI_CLIENT_TOKEN'),
-    'zapi_url' => 'https://api.z-api.io/instances/UID/token/TOKEN/ACTION',
-    'subscription_url' => 'https://api.z-api.io/instances/UID/token/TOKEN/integrator/on-demand/subscription',
-    'unsubscription_url' => 'https://api.z-api.io/instances/UID/token/TOKEN/integrator/on-demand/cancel',
-    'on_demand_url' => 'https://api.z-api.io/instances/integrator/on-demand',
+    'zapi_url' => env('ZAPI_BASE_URL', 'https://api.z-api.io') . '/instances/UID/token/TOKEN/ACTION',
+    'subscription_url' => env('ZAPI_BASE_URL', 'https://api.z-api.io') . '/instances/UID/token/TOKEN/integrator/on-demand/subscription',
+    'unsubscription_url' => env('ZAPI_BASE_URL', 'https://api.z-api.io') . '/instances/UID/token/TOKEN/integrator/on-demand/cancel',
+    'on_demand_url' => env('ZAPI_BASE_URL', 'https://api.z-api.io') . '/instances/integrator/on-demand',
 
     // Webhook configuration
     'webhook_base_url' => env('WEBHOOK_BASE_URL', env('APP_URL')),
