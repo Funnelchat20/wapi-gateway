@@ -28,11 +28,15 @@ class WapiServiceProvider extends ServiceProvider
     public function boot()
     {
         JsonResource::withoutWrapping();
+
+        $this->mergeConfigFrom(__DIR__ . '/../../config/wapi-gateway.php', 'wapi-gateway');
+
         $this->publishes([
             __DIR__ . '/../../config/zapi.php' => config_path('zapi.php'),
             __DIR__ . '/../../config/uazapi.php' => config_path('uazapi.php'),
             __DIR__ . '/../../config/funapi.php' => config_path('funapi.php'),
             __DIR__ . '/../../config/constants.php' => config_path('constants.php'),
+            __DIR__ . '/../../config/wapi-gateway.php' => config_path('wapi-gateway.php'),
         ], 'wapi-config');
 
         $this->app->singleton('wapi.gateway', function ($app) {

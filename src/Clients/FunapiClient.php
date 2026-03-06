@@ -17,6 +17,7 @@ use Funnelchat\WapiGateway\Resources\Zapi\ContactResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupsResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CreateGroupResource;
+use Funnelchat\WapiGateway\Jobs\StoreDeviceLogJob;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Client\ConnectionException;
 
@@ -69,16 +70,17 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
         if ($res->failed() || $res->json('error')) {
             $error = $this->formatError($res->json('error', 'error'));
-            $this->logRequest('sendText', $uid, ['error' => $error, 'phone' => $to], $startTime, $res);
+            $this->logRequest('sendText', $uid, ['error' => $error, 'phone' => $to], $startTime, $res, $url, $payload);
             return ['error' => $error];
         }
 
-        $this->logRequest('sendText', $uid, ['phone' => $to, 'has_retry' => $options['retry'] ?? false], $startTime, $res);
+        $this->logRequest('sendText', $uid, ['phone' => $to, 'has_retry' => $options['retry'] ?? false], $startTime, $res, $url, $payload);
         return MessageResource::make($res->json());
     }
 
     public function create(int $userId, int $deviceId): array
     {
+        $startTime = microtime(true);
         $name = 'U-' . $userId . ' D-' . $deviceId;
         $webhookBaseUrl = config('funapi.webhook_base_url');
 
@@ -97,7 +99,9 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
             $payload['blockCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/block?userId=' . $userId . '&deviceId=' . $deviceId;
         }
 
-        $res = Http::withToken(config('funapi.token'))->post(config('funapi.on_demand_url'), $payload);
+        $url = config('funapi.on_demand_url');
+        $res = Http::withToken(config('funapi.token'))->post($url, $payload);
+        $this->logRequest('create', "U-{$userId}-D-{$deviceId}", $res->failed() ? ['error' => $res->json('error', 'Failed to create instance')] : [], $startTime, $res, $url, $payload);
 
         if ($res->failed()) {
             return ['error' => $res->json('error', 'Failed to create instance')];
@@ -108,8 +112,10 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function status(string $uid, string $token): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'status');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
+        $this->logRequest('status', $uid, $res->failed() ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
 
         // Handle failures - check for PENDING_SUBSCRIPTION special case
         if ($res->failed()) {
@@ -163,32 +169,40 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function qrCode(string $uid, string $token): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'qr-code/image');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
+        $this->logRequest('qrCode', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return QrCodeResource::make($res->json());
     }
 
     public function logout(string $uid, string $token): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'disconnect');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
+        $this->logRequest('logout', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return LogOutResource::make($res->json());
     }
 
     public function reboot(string $uid, string $token): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'restart');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
+        $this->logRequest('reboot', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return RebootResource::make($res->json());
     }
 
     public function me(string $uid, string $token): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'device');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
+        $this->logRequest('me', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return MeResource::make($res->json());
     }
@@ -223,8 +237,10 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function getParticipants(string $uid, string $token, string $phone): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'light-group-metadata/' . $phone);
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
+        $this->logRequest('getParticipants', $uid, $res->failed() || $res->json('error') || $res->json('success') === false ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error') || $res->json('success') === false) return [];
         return $res->json('participants') ?? [];
     }
@@ -289,16 +305,17 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
         if ($res->failed() || $res->json('error')) {
             $error = $this->formatError($res->json('error', 'error'));
             $context['error'] = $error;
-            $this->logRequest('sendFile', $uid, $context, $startTime, $res);
+            $this->logRequest('sendFile', $uid, $context, $startTime, $res, $url);
             return ['error' => $error];
         }
 
-        $this->logRequest('sendFile', $uid, $context, $startTime, $res);
+        $this->logRequest('sendFile', $uid, $context, $startTime, $res, $url);
         return MessageResource::make($res->json());
     }
 
     public function sendLocation(string $uid, string $token, string $to, float $lat, float $lng, array $options = []): array
     {
+        $startTime = microtime(true);
         $params = ['phone' => $to, 'latitude' => $lat, 'longitude' => $lng];
         if (isset($options['name'])) $params['name'] = $options['name'];
         if (isset($options['address'])) $params['address'] = $options['address'];
@@ -307,6 +324,7 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
         $url = $this->buildUrl($uid, $token, 'send-location');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(120)->post($url, $params);
+        $this->logRequest('sendLocation', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error', 'error'))];
         }
@@ -350,88 +368,113 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function createNewsletter(string $uid, string $token, string $name, string $description): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'create-newsletter');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->post($url, ['name' => $name, 'description' => $description]);
+        $payload = ['name' => $name, 'description' => $description];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->post($url, $payload);
+        $this->logRequest('createNewsletter', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
 
     public function updateNewsletterName(string $uid, string $token, string $id, string $name): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'update-newsletter-name');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->put($url, ['id' => $id, 'name' => $name]);
+        $this->logRequest('updateNewsletterName', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
 
     public function updateNewsletterDescription(string $uid, string $token, string $id, string $description): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'update-newsletter-description');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->put($url, ['id' => $id, 'description' => $description]);
+        $this->logRequest('updateNewsletterDescription', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
 
     public function updateNewsletterPicture(string $uid, string $token, string $id, string $photoUrl): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'update-newsletter-picture');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->put($url, ['id' => $id, 'picture' => $photoUrl]);
+        $this->logRequest('updateNewsletterPicture', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
 
     public function newsletters(string $uid, string $token): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'newsletter');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 60))->get($url);
+        $this->logRequest('newsletters', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
 
     public function newsletterMetadata(string $uid, string $token, string $id): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'newsletter/metadata/' . $id);
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 60))->get($url);
+        $this->logRequest('newsletterMetadata', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
 
     public function groupInvitationLink(string $uid, string $token, string $groupId): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'group-invitation-link/' . $groupId . '-group');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 60))->get($url);
+        $this->logRequest('groupInvitationLink', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
 
     public function lightGroupMetadata(string $uid, string $token, string $groupId): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'light-group-metadata/' . $groupId . '-group');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 60))->get($url);
+        $this->logRequest('lightGroupMetadata', $uid, $res->failed() || $res->json('error') || $res->json('success') === false ? ['error' => $res->json('error', $res->json('message', 'error'))] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error') || $res->json('success') === false) return ['error' => $this->formatError($res->json('error', $res->json('message', 'error')))];
         return $res->json();
     }
 
     public function groupMetadata(string $uid, string $token, string $groupId): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'group-metadata/' . $groupId . '-group');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->get($url);
+        $this->logRequest('groupMetadata', $uid, $res->failed() || $res->json('error') || $res->json('success') === false ? ['error' => $res->json('error', $res->json('message', 'error'))] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error') || $res->json('success') === false) return ['error' => $this->formatError($res->json('error', $res->json('message', 'error')))];
         return $res->json();
     }
 
     public function pinMessage(string $uid, string $token, string $phone, string $messageId, int $duration): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'pin-message');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 60))->post($url, ['phone' => $phone, 'messageId' => $messageId, 'time' => $duration]);
+        $payload = ['phone' => $phone, 'messageId' => $messageId, 'time' => $duration];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 60))->post($url, $payload);
+        $this->logRequest('pinMessage', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
 
     public function addContacts(string $uid, string $token, array $contacts): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'add-contacts');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->post($url, ['contacts' => $contacts]);
+        $payload = ['contacts' => $contacts];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->post($url, $payload);
+        $this->logRequest('addContacts', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
@@ -460,9 +503,11 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function groups(string $uid, string $token, array $options = []): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'groups');
         $params = ['page' => $options['page'] ?? 1, 'pageSize' => $options['pageSize'] ?? 299];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url, $params);
+        $this->logRequest('groups', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         $filtered = collect($res->collect())->filter(fn($g) => array_key_exists('communityId', $g) && empty($g['communityId']))->unique('phone')->values();
         return GroupsResource::collection($filtered->toArray());
@@ -470,9 +515,11 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function adGroups(string $uid, string $token, array $options = []): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'groups');
         $params = ['page' => $options['page'] ?? 1, 'pageSize' => $options['pageSize'] ?? 999];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url, $params);
+        $this->logRequest('adGroups', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         $filtered = collect($res->collect())->filter(fn($g) => array_key_exists('communityId', $g) && !empty($g['communityId']))->values();
         return $filtered->toArray();
@@ -480,8 +527,10 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function group(string $uid, string $token, string $id): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'group-metadata/' . $id . '-group');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
+        $this->logRequest('group', $uid, $res->failed() || $res->json('error') || $res->json('success') === false ? ['error' => $res->json('error', $res->json('message', 'error'))] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error') || $res->json('success') === false) return ['error' => $this->formatError($res->json('error', $res->json('message', 'error')))];
         $image = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($this->buildUrl($uid, $token, 'chats/' . $id . '-group'))->json('profileThumbnail', '');
         $data = $res->json();
@@ -491,8 +540,11 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function createGroup(string $uid, string $token, string $name, array $participants, array $options = []): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'create-group');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, ['groupName' => $name, 'phones' => $participants, 'autoInvite' => true]);
+        $payload = ['groupName' => $name, 'phones' => $participants, 'autoInvite' => true];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
+        $this->logRequest('createGroup', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         $data = $res->json();
         if (!isset($data['phone'])) return ['error' => 'group_phone_missing'];
@@ -507,163 +559,216 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function updateGroupName(string $uid, string $token, string $id, string $name): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'update-group-name');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, ['groupId' => $id, 'groupName' => $name]);
+        $payload = ['groupId' => $id, 'groupName' => $name];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
+        $this->logRequest('updateGroupName', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
     }
 
     public function updateGroupDescription(string $uid, string $token, string $id, string $description): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'update-group-description');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, ['groupId' => $id . '-group', 'groupDescription' => $description]);
+        $payload = ['groupId' => $id . '-group', 'groupDescription' => $description];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
+        $this->logRequest('updateGroupDescription', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
     }
 
     public function updateGroupSettings(string $uid, string $token, string $id, bool $adminOnlyMessage, bool $adminOnlySettings): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'update-group-settings');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, ['phone' => $id . '-group', 'adminOnlyMessage' => $adminOnlyMessage, 'adminOnlySettings' => $adminOnlySettings]);
+        $payload = ['phone' => $id . '-group', 'adminOnlyMessage' => $adminOnlyMessage, 'adminOnlySettings' => $adminOnlySettings];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
+        $this->logRequest('updateGroupSettings', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
     }
 
     public function updateGroupPhoto(string $uid, string $token, string $id, string $photoUrl): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'update-group-photo');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, ['groupId' => $id, 'groupPhoto' => $photoUrl]);
+        $payload = ['groupId' => $id, 'groupPhoto' => $photoUrl];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
+        $this->logRequest('updateGroupPhoto', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
     }
 
     public function addParticipants(string $uid, string $token, string $id, array $phones): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'add-participant');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, ['autoInvite' => true, 'groupId' => $id, 'phones' => $phones]);
+        $payload = ['autoInvite' => true, 'groupId' => $id, 'phones' => $phones];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
+        $this->logRequest('addParticipants', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
     }
 
     public function addAdmins(string $uid, string $token, string $id, array $phones): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'add-admin');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, ['groupId' => $id, 'phones' => $phones]);
+        $payload = ['groupId' => $id, 'phones' => $phones];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
+        $this->logRequest('addAdmins', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
     }
 
     public function removeParticipants(string $uid, string $token, string $id, array $phones): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'remove-participant');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, ['groupId' => $id, 'phones' => $phones]);
+        $payload = ['groupId' => $id, 'phones' => $phones];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
+        $this->logRequest('removeParticipants', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
     }
 
     public function removeAdmins(string $uid, string $token, string $id, array $phones): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'remove-admin');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, ['groupId' => $id, 'phones' => $phones]);
+        $payload = ['groupId' => $id, 'phones' => $phones];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
+        $this->logRequest('removeAdmins', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
     }
 
     public function leaveGroup(string $uid, string $token, string $id): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'leave-group');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, ['groupId' => $id . '-group']);
+        $payload = ['groupId' => $id . '-group'];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
+        $this->logRequest('leaveGroup', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
     }
 
     public function contact(string $uid, string $token, string $phone): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'contacts/' . $phone);
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
+        $this->logRequest('contact', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('message') ?? $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('message') ?? $res->json('error', 'error'))];
         return ContactResource::make($res->json());
     }
 
     public function contacts(string $uid, string $token, array $options = []): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'contacts');
         $params = ['page' => $options['page'] ?? 1, 'pageSize' => $options['pageSize'] ?? 50];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url, $params);
+        $this->logRequest('contacts', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('message') ?? $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('message') ?? $res->json('error', 'error'))];
         return $res->collect()->toArray();
     }
 
     public function sendContact(string $uid, string $token, string $to, string $contactName, string $contactPhone, array $options = []): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'send-contact');
         $payload = ['phone' => $to, 'contactName' => $contactName, 'contactPhone' => $contactPhone];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
+        $this->logRequest('sendContact', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
 
     public function communities(string $uid, string $token, array $options = []): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'communities');
         $params = ['page' => $options['page'] ?? 1, 'pageSize' => $options['pageSize'] ?? 10];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url, $params);
+        $this->logRequest('communities', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
 
     public function communitiesMetadata(string $uid, string $token, string $id): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'communities-metadata/' . $id);
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
+        $this->logRequest('communitiesMetadata', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
 
     public function community(string $uid, string $token, array $data): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'communities');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, ['name' => $data['name'], 'description' => $data['description'] ?? null]);
+        $payload = ['name' => $data['name'], 'description' => $data['description'] ?? null];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
+        $this->logRequest('community', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         $communityId = $res->json('id');
-        Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($this->buildUrl($uid, $token, 'communities/settings'), ['communityId' => $communityId, 'whoCanAddNewGroups' => 'admins']);
+        $startTime2 = microtime(true);
+        $settingsUrl = $this->buildUrl($uid, $token, 'communities/settings');
+        $settingsPayload = ['communityId' => $communityId, 'whoCanAddNewGroups' => 'admins'];
+        $settingsRes = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($settingsUrl, $settingsPayload);
+        $this->logRequest('community.settings', $uid, $settingsRes->failed() || $settingsRes->json('error') ? ['error' => $settingsRes->json('error', 'error')] : [], $startTime2, $settingsRes, $settingsUrl, $settingsPayload);
         return $res->json();
     }
 
     public function groupInvitationMetadata(string $uid, string $token, string $url): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'group-invitation-metadata');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url, ['url' => $url]);
+        $this->logRequest('groupInvitationMetadata', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('message') ?? $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('message') ?? $res->json('error', 'error'))];
         return $res->json();
     }
 
     public function chats(string $uid, string $token, array $options = []): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'chats');
         $params = [];
         if (isset($options['page'])) $params['page'] = (int) $options['page'];
         if (isset($options['pageSize'])) $params['pageSize'] = (int) $options['pageSize'];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url, $params);
+        $this->logRequest('chats', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
 
     public function deleteChat(string $uid, string $token, string $phone): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'modify-chat');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, ['phone' => $phone, 'action' => 'delete']);
+        $payload = ['phone' => $phone, 'action' => 'delete'];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
+        $this->logRequest('deleteChat', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
     }
 
     public function deleteMessage(string $uid, string $token, string $messageId, string $phone, bool $owner): array
     {
+        $startTime = microtime(true);
         $base = $this->buildUrl($uid, $token, 'messages');
         $query = http_build_query(['messageId' => $messageId, 'phone' => $phone]) . ($owner ? '&owner=true' : '');
         $url = $base . '?' . $query;
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(20)->delete($url);
+        $this->logRequest('deleteMessage', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
     }
@@ -678,32 +783,44 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
      * @param mixed $response Response object or data
      * @return void
      */
-    private function logRequest(string $method, string $uid, array $context = [], ?float $startTime = null, $response = null): void
+    private function logRequest(string $method, string $uid, array $context = [], ?float $startTime = null, $response = null, string $url = '', array $requestPayload = []): void
     {
+        $durationMs = $startTime !== null ? (int)((microtime(true) - $startTime) * 1000) : null;
+
         $logData = [
             'method' => $method,
             'instance_uid' => $uid,
         ];
 
-        // Add request duration if start time provided
-        if ($startTime !== null) {
-            $logData['request_time_ms'] = (int)((microtime(true) - $startTime) * 1000);
+        if ($durationMs !== null) {
+            $logData['request_time_ms'] = $durationMs;
         }
 
-        // Add response status if available
         if ($response && method_exists($response, 'status')) {
             $logData['status_code'] = $response->status();
             $logData['success'] = $response->successful();
         }
 
-        // Merge additional context
         $logData = array_merge($logData, $context);
 
-        // Log at appropriate level
         if (isset($context['error'])) {
             logger()->error("wapi-gateway.funapi.{$method}.error", $logData);
         } else {
             logger()->info("wapi-gateway.funapi.{$method}", $logData);
+        }
+
+        if (config('wapi-gateway.logging_enabled', true)) {
+            StoreDeviceLogJob::dispatch(
+                $uid,
+                'funapi',
+                $method,
+                $url,
+                $requestPayload,
+                $response && method_exists($response, 'json') ? $response->json() : null,
+                $response && method_exists($response, 'status') ? $response->status() : null,
+                $durationMs,
+                isset($context['error']),
+            );
         }
     }
 
@@ -724,33 +841,41 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function showQueue(string $uid, string $token, array $options = []): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'queue');
         $params = ['page' => $options['page'] ?? 1, 'pageSize' => $options['pageSize'] ?? 499];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url, $params);
+        $this->logRequest('showQueue', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
 
     public function queueCount(string $uid, string $token): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'queue/count');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
+        $this->logRequest('queueCount', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['count' => $res->json('count')];
     }
 
     public function deleteQueueMessage(string $uid, string $token, string $messageQueueUid): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'queue/' . $messageQueueUid);
         $res = Http::withHeaders(['accept' => 'application/json', 'client-token' => config('funapi.client_token')])->delete($url);
+        $this->logRequest('deleteQueueMessage', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
     }
 
     public function clearQueue(string $uid, string $token): array
     {
+        $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'queue');
         $res = Http::withHeaders(['accept' => 'application/json', 'client-token' => config('funapi.client_token')])->delete($url);
+        $this->logRequest('clearQueue', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
     }

@@ -355,6 +355,56 @@ Log::warning('UAZAPI webhook configuration failed', [...]);
 Log::warning('UAZAPI webhook configuration skipped: WEBHOOK_BASE_URL not configured', [...]);
 ```
 
+## Device Logging (Request/Response a DB)
+
+El SDK loggea automáticamente cada request HTTP a los proveedores en la tabla `device_logs`, incluyendo el payload enviado y la respuesta recibida.
+
+### Configuración
+
+```env
+# Habilitar/deshabilitar logging a DB (habilitado por defecto)
+WAPI_GATEWAY_LOGGING_ENABLED=true
+
+# Conexión de base de datos a usar (por defecto: mysql)
+WAPI_GATEWAY_DATABASE_CONNECTION=mysql
+```
+
+### Migración
+
+Publicar y correr la migración:
+
+```bash
+php artisan vendor:publish --tag=wapi-migrations
+php artisan migrate
+```
+
+### Estructura de la tabla `device_logs`
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `instance_uid` | string | UID de la instancia de WhatsApp |
+| `provider` | string | Proveedor usado (`zapi`, `uazapi`, `funapi`, `meta`) |
+| `method` | string | Método ejecutado (`sendText`, `status`, `createGroup`, etc.) |
+| `url` | string | URL completa del request HTTP |
+| `request_payload` | json | Body enviado al proveedor (ej: `{"phone": "549...", "message": "Hola"}`) |
+| `response_body` | json | Respuesta del proveedor |
+| `status_code` | int | Código HTTP de respuesta |
+| `duration_ms` | int | Tiempo de respuesta en milisegundos |
+| `is_error` | boolean | Si el request resultó en error |
+
+### Queue
+
+Los logs se despachan vía el job `StoreDeviceLogJob` en la cola `device-logs`. Asegurate de tener un worker procesando esa cola:
+
+```bash
+php artisan queue:work --queue=device-logs
+```
+
+### Notas
+- Los métodos GET (`status`, `qrCode`, `me`, `contact`, etc.) registran `request_payload` como `[]` ya que no envían body.
+- Los métodos POST (`sendText`, `sendFile`, `createGroup`, `addContacts`, etc.) registran el payload completo enviado al proveedor.
+- El logging es asíncrono y no impacta el tiempo de respuesta de las operaciones.
+
 ## Sistema de Resources
 
 El SDK transforma las respuestas de cada proveedor para mantener compatibilidad con WAPI original:
@@ -459,6 +509,10 @@ class WhatsAppController extends Controller
 - ✨ Sección de Contactos: `contact()`, `contacts()`, `sendContact()`, `addContacts()`
 - ✨ Métodos de grupos: `adGroups()`, `groupInvitationMetadata()`, `groupInvitationLink()`, `lightGroupMetadata()`, `groupMetadata()`
 - ✨ Método `pinMessage()` en MessagesContract
+- ✨ Device Logging: `StoreDeviceLogJob` registra request payload y response en tabla `device_logs` vía cola asíncrona
+
+**Fixed:**
+- 🐛 `request_payload` en `device_logs` ahora contiene el body HTTP real enviado al proveedor en todos los métodos POST (antes se guardaba `[]`)
 
 ### v0.2.0 - 2025-01-XX
 

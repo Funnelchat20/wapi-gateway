@@ -17,6 +17,7 @@ use Funnelchat\WapiGateway\Resources\Uazapi\ContactResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\GroupsResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\GroupResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\CreateGroupResource;
+use Funnelchat\WapiGateway\Jobs\StoreDeviceLogJob;
 use Illuminate\Support\Facades\Http;
 
 class UazapiClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract
@@ -30,28 +31,36 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
     {
+        $startTime = microtime(true);
         $base = config('uazapi.base_url');
         $timeout = config('uazapi.timeout', 120);
+        $url = $base . config('uazapi.endpoints.send_message');
         $payload = ['number' => $to, 'text' => $text];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
-        $res = Http::withHeaders(['token' => $token])->timeout($timeout)->asJson()->post($base . config('uazapi.endpoints.send_message'), $payload);
+        $res = Http::withHeaders(['token' => $token])->timeout($timeout)->asJson()->post($url, $payload);
         if ($res->failed() || $res->json('error')) {
-            return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
+            $error = $this->formatError($res->json('message') ?? $res->json('error') ?? 'error');
+            $this->logRequest('sendText', $uid, ['error' => $error, 'phone' => $to], $startTime, $res, $url, $payload);
+            return ['error' => $error];
         }
+        $this->logRequest('sendText', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
         return MessageResource::make($res->json());
     }
 
     public function create(int $userId, int $deviceId): array
     {
+        $startTime = microtime(true);
         $base = config('uazapi.base_url');
         $timeout = config('uazapi.timeout', 120);
         $name = 'U-' . $userId . ' D-' . $deviceId;
+        $url = $base . '/instance/init';
 
         // 1. Create instance
         $res = Http::withHeaders(['admintoken' => config('uazapi.admin_token')])
             ->timeout($timeout)
-            ->post($base . '/instance/init', ['name' => $name]);
+            ->post($url, ['name' => $name]);
 
+        $this->logRequest('create', "U-{$userId}-D-{$deviceId}", $res->failed() ? ['error' => $res->json('error', 'Failed to create instance')] : [], $startTime, $res, $url, ['name' => $name]);
         if ($res->failed()) {
             return ['error' => $res->json('error', 'Failed to create instance')];
         }
@@ -72,8 +81,10 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function status(string $uid, string $token): array
     {
+        $startTime = microtime(true);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.status');
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->get($url);
+        $this->logRequest('status', $uid, $res->failed() ? ['error' => $res->json('message') ?? $res->json('error')] : [], $startTime, $res, $url);
 
         // Handle HTTP failures
         if ($res->failed()) {
@@ -191,8 +202,10 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function qrCode(string $uid, string $token): array
     {
+        $startTime = microtime(true);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.qr_code');
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->withBody('{}', 'application/json')->post($url);
+        $this->logRequest('qrCode', $uid, $res->failed() ? ['error' => $res->json('message') ?? $res->json('error') ?? 'error'] : [], $startTime, $res, $url);
         if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
         $data = $res->json();
         return ['qrcode' => $data['instance']['qrcode'] ?? $data['qrcode'] ?? null, 'paircode' => $data['instance']['paircode'] ?? $data['paircode'] ?? null];
@@ -200,32 +213,45 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function logout(string $uid, string $token): array
     {
+        $startTime = microtime(true);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.disconnect');
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->post($url);
+        $this->logRequest('logout', $uid, $res->failed() ? ['error' => $res->json('message') ?? $res->json('error') ?? 'error'] : [], $startTime, $res, $url);
         if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
         return LogOutResource::make($res->json());
     }
 
     public function reboot(string $uid, string $token): array
     {
-        $disc = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->post(config('uazapi.base_url') . config('uazapi.endpoints.disconnect'));
+        $startTime = microtime(true);
+        $discUrl = config('uazapi.base_url') . config('uazapi.endpoints.disconnect');
+        $disc = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->post($discUrl);
+        $this->logRequest('reboot', $uid, $disc->failed() ? ['error' => $disc->json('message') ?? $disc->json('error') ?? 'error', 'step' => 'disconnect'] : ['step' => 'disconnect'], $startTime, $disc, $discUrl);
         if ($disc->failed()) return ['error' => $this->formatError($disc->json('message') ?? $disc->json('error') ?? 'error')];
-        $conn = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->post(config('uazapi.base_url') . config('uazapi.endpoints.connect'));
+        $connStartTime = microtime(true);
+        $connUrl = config('uazapi.base_url') . config('uazapi.endpoints.connect');
+        $conn = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->post($connUrl);
+        $this->logRequest('reboot', $uid, $conn->failed() ? ['error' => $conn->json('message') ?? $conn->json('error') ?? 'error', 'step' => 'connect'] : ['step' => 'connect'], $connStartTime, $conn, $connUrl);
         if ($conn->failed()) return ['error' => $this->formatError($conn->json('message') ?? $conn->json('error') ?? 'error')];
         return ['status' => 'restarted'];
     }
 
     public function me(string $uid, string $token): array
     {
-        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->get(config('uazapi.base_url') . config('uazapi.endpoints.status'));
+        $startTime = microtime(true);
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.status');
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->get($url);
+        $this->logRequest('me', $uid, $res->failed() ? ['error' => $res->json('message') ?? $res->json('error') ?? 'error'] : [], $startTime, $res, $url);
         if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
         return MeResource::make($res->json());
     }
 
     public function checkPhone(string $uid, string $token, string $phone): array
     {
+        $startTime = microtime(true);
         $url = config('uazapi.base_url') . '/contact/checkPhone/' . $phone;
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->get($url);
+        $this->logRequest('checkPhone', $uid, $res->failed() ? ['error' => $res->json('message') ?? $res->json('error') ?? 'error', 'phone' => $phone] : ['phone' => $phone], $startTime, $res, $url);
         if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
         return CheckPhoneResource::make($res->json());
     }
@@ -237,7 +263,10 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function unsubscribe(string $uid, string $token): array
     {
-        $disc = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->post(config('uazapi.base_url') . config('uazapi.endpoints.disconnect'));
+        $startTime = microtime(true);
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.disconnect');
+        $disc = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->post($url);
+        $this->logRequest('unsubscribe', $uid, $disc->failed() || $disc->json('error') ? ['error' => $disc->json('error') ?? $disc->json('message')] : [], $startTime, $disc, $url);
         if ($disc->failed() || $disc->json('error')) return ['error' => $this->formatError($disc->json('error') ?? $disc->json('message'))];
         return ['success' => true];
     }
@@ -249,6 +278,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
+        $startTime = microtime(true);
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $type = $this->mapType($ext);
         if ($type === 'invalid') return ['error' => 'Invalid file extension'];
@@ -256,20 +286,27 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         if (isset($options['caption'])) $payload['text'] = $options['caption'];
         if (isset($options['fileName']) && $type === 'document') $payload['docName'] = $options['fileName'];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
-        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post(config('uazapi.base_url') . config('uazapi.endpoints.send_document'), $payload);
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.send_document');
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post($url, $payload);
         if ($res->failed() || $res->json('error')) {
-            return ['error' => $this->formatError($res->json('error'))];
+            $error = $this->formatError($res->json('error'));
+            $this->logRequest('sendFile', $uid, ['error' => $error, 'phone' => $to, 'file_type' => $ext], $startTime, $res, $url, $payload);
+            return ['error' => $error];
         }
+        $this->logRequest('sendFile', $uid, ['phone' => $to, 'file_type' => $ext], $startTime, $res, $url, $payload);
         return MessageResource::make($res->json());
     }
 
     public function sendLocation(string $uid, string $token, string $to, float $lat, float $lng, array $options = []): array
     {
+        $startTime = microtime(true);
         $payload = ['number' => $to, 'latitude' => $lat, 'longitude' => $lng];
         if (isset($options['name'])) $payload['name'] = $options['name'];
         if (isset($options['address'])) $payload['address'] = $options['address'];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
-        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post(config('uazapi.base_url') . config('uazapi.endpoints.send_location'), $payload);
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.send_location');
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post($url, $payload);
+        $this->logRequest('sendLocation', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error'))];
         }
@@ -278,10 +315,13 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function sendButtons(string $uid, string $token, string $to, string $message, array $buttons, array $options = []): array
     {
+        $startTime = microtime(true);
         $choices = array_map(fn($b) => ($b['label'] ?? '') . '|' . ($b['id'] ?? ''), $buttons);
         $payload = ['number' => $to, 'type' => 'button', 'text' => $message, 'choices' => $choices];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
-        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post(config('uazapi.base_url') . config('uazapi.endpoints.send_buttons'), $payload);
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.send_buttons');
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post($url, $payload);
+        $this->logRequest('sendButtons', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error'))];
         }
@@ -290,9 +330,12 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function sendButtonLink(string $uid, string $token, string $to, string $message, string $url, string $label, array $options = []): array
     {
+        $startTime = microtime(true);
         $payload = ['number' => $to, 'type' => 'button', 'text' => $message, 'choices' => [$label . '|' . $url]];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
-        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post(config('uazapi.base_url') . config('uazapi.endpoints.send_buttons'), $payload);
+        $endpointUrl = config('uazapi.base_url') . config('uazapi.endpoints.send_buttons');
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post($endpointUrl, $payload);
+        $this->logRequest('sendButtonLink', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $endpointUrl, $payload);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error'))];
         }
@@ -301,6 +344,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function sendOptionList(string $uid, string $token, string $to, string $message, string $buttonLabel, array $optionsList, array $extra = []): array
     {
+        $startTime = microtime(true);
         $choices = ['[Opciones]'];
         foreach ($optionsList as $option) {
             $row = ($option['title'] ?? '') . '|' . ($option['id'] ?? '');
@@ -309,7 +353,9 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         }
         $payload = ['number' => $to, 'type' => 'list', 'text' => $message, 'choices' => $choices, 'listButton' => $buttonLabel];
         if (isset($extra['delayMessage'])) $payload['delay'] = (int) $extra['delayMessage'];
-        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post(config('uazapi.base_url') . config('uazapi.endpoints.send_list'), $payload);
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.send_list');
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post($url, $payload);
+        $this->logRequest('sendOptionList', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error'))];
         }
@@ -318,10 +364,13 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function sendPoll(string $uid, string $token, string $to, string $message, array $pollOptions, array $options = []): array
     {
+        $startTime = microtime(true);
         $payload = ['number' => $to, 'type' => 'poll', 'text' => $message, 'choices' => array_values($pollOptions)];
         if (isset($options['pollMaxOptions'])) $payload['selectableCount'] = (int) $options['pollMaxOptions'];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
-        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post(config('uazapi.base_url') . config('uazapi.endpoints.send_poll'), $payload);
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.send_poll');
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post($url, $payload);
+        $this->logRequest('sendPoll', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error'))];
         }
@@ -330,12 +379,15 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function sendLink(string $uid, string $token, string $to, string $message, string $linkUrl, array $options = []): array
     {
+        $startTime = microtime(true);
         $payload = ['number' => $to, 'text' => $message . ' ' . $linkUrl, 'linkPreview' => true];
         if (isset($options['title'])) $payload['linkPreviewTitle'] = $options['title'];
         if (isset($options['linkDescription'])) $payload['linkPreviewDescription'] = $options['linkDescription'];
         if (isset($options['image'])) $payload['linkPreviewImage'] = $options['image'];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
-        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post(config('uazapi.base_url') . config('uazapi.endpoints.send_link'), $payload);
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.send_link');
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post($url, $payload);
+        $this->logRequest('sendLink', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error'))];
         }
@@ -379,10 +431,12 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function groups(string $uid, string $token, array $options = []): array
     {
+        $startTime = microtime(true);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.groups');
         $res = Http::withHeaders(['token' => $token, 'Accept' => 'application/json'])
             ->timeout(config('uazapi.timeout', 30))
             ->get($url);
+        $this->logRequest('groups', $uid, $res->failed() ? ['error' => $res->json('error') ?? $res->json('message') ?? 'Unknown error'] : [], $startTime, $res, $url);
         if ($res->failed()) {
             return ['error' => $this->formatError($res->json('error') ?? $res->json('message') ?? 'Unknown error')];
         }
@@ -397,10 +451,12 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function adGroups(string $uid, string $token, array $options = []): array
     {
+        $startTime = microtime(true);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.groups');
         $res = Http::withHeaders(['token' => $token, 'Accept' => 'application/json'])
             ->timeout(config('uazapi.timeout', 30))
             ->get($url);
+        $this->logRequest('adGroups', $uid, $res->failed() ? ['error' => $res->json('error') ?? $res->json('message') ?? 'Unknown error'] : [], $startTime, $res, $url);
         if ($res->failed()) {
             return ['error' => $this->formatError($res->json('error') ?? $res->json('message') ?? 'Unknown error')];
         }
@@ -415,11 +471,14 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function group(string $uid, string $token, string $id): array
     {
+        $startTime = microtime(true);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.group');
+        $payload = ['groupjid' => str_contains($id, '@g.us') ? $id : ($id . '@g.us')];
         $res = Http::withHeaders(['token' => $token])
             ->timeout(config('uazapi.timeout', 30))
             ->asJson()
-            ->post($url, ['groupjid' => str_contains($id, '@g.us') ? $id : ($id . '@g.us')]);
+            ->post($url, $payload);
+        $this->logRequest('group', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error') ?? $res->json('message')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
         }
@@ -428,12 +487,14 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function createGroup(string $uid, string $token, string $name, array $participants, array $options = []): array
     {
+        $startTime = microtime(true);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.create_group');
         $payload = ['name' => $name, 'participants' => array_values($participants)];
         $res = Http::withHeaders(['token' => $token])
             ->timeout(config('uazapi.timeout', 120))
             ->asJson()
             ->post($url, $payload);
+        $this->logRequest('createGroup', $uid, $res->failed() ? ['error' => $res->json('message') ?? $res->json('error') ?? 'Group creation failed'] : [], $startTime, $res, $url, $payload);
         if ($res->failed()) {
             return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'Group creation failed')];
         }
@@ -441,7 +502,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         $groupId = $data['group']['JID'] ?? $data['id'] ?? $data['phone'] ?? $data['groupId'] ?? null;
         if (!$groupId) return ['error' => 'group_id_missing'];
         if (!empty($options['admins'])) {
-            $this->updateParticipants($token, $groupId, 'promote', $options['admins']);
+            $this->updateParticipants($token, $groupId, 'promote', $options['admins'], $uid);
         }
         if (!empty($options['photo'])) {
             Http::withHeaders(['token' => $token])
@@ -454,33 +515,49 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function updateGroupName(string $uid, string $token, string $id, string $name): array
     {
+        $startTime = microtime(true);
         $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.update_group_name');
+        $payload = ['groupjid' => $gid, 'name' => $name];
         $res = Http::withHeaders(['token' => $token])
             ->timeout(config('uazapi.timeout', 60))
             ->asJson()
-            ->post(config('uazapi.base_url') . config('uazapi.endpoints.update_group_name'), ['groupjid' => $gid, 'name' => $name]);
+            ->post($url, $payload);
+        $this->logRequest('updateGroupName', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error'))];
         return ['success' => true];
     }
 
     public function updateGroupDescription(string $uid, string $token, string $id, string $description): array
     {
+        $startTime = microtime(true);
         $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.update_group_description');
+        $payload = ['groupjid' => $gid, 'description' => $description];
         $res = Http::withHeaders(['token' => $token])
             ->timeout(config('uazapi.timeout', 60))
             ->asJson()
-            ->post(config('uazapi.base_url') . config('uazapi.endpoints.update_group_description'), ['groupjid' => $gid, 'description' => $description]);
+            ->post($url, $payload);
+        $this->logRequest('updateGroupDescription', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error'))];
         return ['success' => true];
     }
 
     public function updateGroupSettings(string $uid, string $token, string $id, bool $adminOnlyMessage, bool $adminOnlySettings): array
     {
+        $startTime = microtime(true);
         $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
+        $announceUrl = config('uazapi.base_url') . config('uazapi.endpoints.update_group_announce');
+        $announcePayload = ['groupjid' => $gid, 'announce' => $adminOnlyMessage];
         $announce = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 60))->asJson()
-            ->post(config('uazapi.base_url') . config('uazapi.endpoints.update_group_announce'), ['groupjid' => $gid, 'announce' => $adminOnlyMessage]);
+            ->post($announceUrl, $announcePayload);
+        $this->logRequest('updateGroupSettings', $uid, $announce->failed() || $announce->json('error') ? ['error' => $announce->json('error'), 'step' => 'announce'] : ['step' => 'announce'], $startTime, $announce, $announceUrl, $announcePayload);
+        $lockedStartTime = microtime(true);
+        $lockedUrl = config('uazapi.base_url') . config('uazapi.endpoints.update_group_locked');
+        $lockedPayload = ['groupjid' => $gid, 'locked' => $adminOnlySettings];
         $locked = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 60))->asJson()
-            ->post(config('uazapi.base_url') . config('uazapi.endpoints.update_group_locked'), ['groupjid' => $gid, 'locked' => $adminOnlySettings]);
+            ->post($lockedUrl, $lockedPayload);
+        $this->logRequest('updateGroupSettings', $uid, $locked->failed() || $locked->json('error') ? ['error' => $locked->json('error'), 'step' => 'locked'] : ['step' => 'locked'], $lockedStartTime, $locked, $lockedUrl, $lockedPayload);
         if ($announce->failed() || $announce->json('error')) return ['error' => $this->formatError($announce->json('error'))];
         if ($locked->failed() || $locked->json('error')) return ['error' => $this->formatError($locked->json('error'))];
         return ['success' => true];
@@ -488,11 +565,15 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function updateGroupPhoto(string $uid, string $token, string $id, string $photoUrl): array
     {
+        $startTime = microtime(true);
         $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.update_group_photo');
+        $payload = ['groupjid' => $gid, 'image' => $photoUrl];
         $res = Http::withHeaders(['token' => $token])
             ->timeout(config('uazapi.timeout', 60))
             ->asJson()
-            ->post(config('uazapi.base_url') . config('uazapi.endpoints.update_group_photo'), ['groupjid' => $gid, 'image' => $photoUrl]);
+            ->post($url, $payload);
+        $this->logRequest('updateGroupPhoto', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error'))];
         return ['success' => true];
     }
@@ -500,7 +581,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
     public function addParticipants(string $uid, string $token, string $id, array $phones): array
     {
         $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
-        $res = $this->updateParticipants($token, $gid, 'add', $phones);
+        $res = $this->updateParticipants($token, $gid, 'add', $phones, $uid);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
         return ['success' => true];
     }
@@ -508,7 +589,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
     public function addAdmins(string $uid, string $token, string $id, array $phones): array
     {
         $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
-        $res = $this->updateParticipants($token, $gid, 'promote', $phones);
+        $res = $this->updateParticipants($token, $gid, 'promote', $phones, $uid);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
         return ['success' => true];
     }
@@ -516,7 +597,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
     public function removeParticipants(string $uid, string $token, string $id, array $phones): array
     {
         $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
-        $res = $this->updateParticipants($token, $gid, 'remove', $phones);
+        $res = $this->updateParticipants($token, $gid, 'remove', $phones, $uid);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
         return ['success' => true];
     }
@@ -524,29 +605,34 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
     public function removeAdmins(string $uid, string $token, string $id, array $phones): array
     {
         $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
-        $res = $this->updateParticipants($token, $gid, 'demote', $phones);
+        $res = $this->updateParticipants($token, $gid, 'demote', $phones, $uid);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
         return ['success' => true];
     }
 
     public function leaveGroup(string $uid, string $token, string $id): array
     {
+        $startTime = microtime(true);
         $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
         $url = config('uazapi.base_url') . config('uazapi.endpoints.leave_group');
+        $payload = ['groupjid' => $gid];
         $res = Http::withHeaders(['token' => $token])
             ->timeout(config('uazapi.timeout', 60))
             ->asJson()
-            ->post($url, ['groupjid' => $gid]);
+            ->post($url, $payload);
+        $this->logRequest('leaveGroup', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error') ?? $res->json('message')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
         return ['success' => true];
     }
 
     public function communities(string $uid, string $token, array $options = []): array
     {
+        $startTime = microtime(true);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.groups');
         $res = Http::withHeaders(['token' => $token, 'Accept' => 'application/json'])
             ->timeout(config('uazapi.timeout', 30))
             ->get($url);
+        $this->logRequest('communities', $uid, $res->failed() ? ['error' => $res->json('error') ?? $res->json('message') ?? 'Unknown error'] : [], $startTime, $res, $url);
         if ($res->failed()) return ['error' => $this->formatError($res->json('error') ?? $res->json('message') ?? 'Unknown error')];
         $data = $res->json();
         $groups = $data['groups'] ?? $data ?? [];
@@ -555,17 +641,21 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function communitiesMetadata(string $uid, string $token, string $id): array
     {
+        $startTime = microtime(true);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.community_metadata');
+        $payload = ['groupjid' => str_contains($id, '@g.us') ? $id : ($id . '@g.us')];
         $res = Http::withHeaders(['token' => $token])
             ->timeout(config('uazapi.timeout', 60))
             ->asJson()
-            ->post($url, ['groupjid' => str_contains($id, '@g.us') ? $id : ($id . '@g.us')]);
+            ->post($url, $payload);
+        $this->logRequest('communitiesMetadata', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error') ?? $res->json('message')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
         return $res->json();
     }
 
     public function community(string $uid, string $token, array $data): array
     {
+        $startTime = microtime(true);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.create_community');
         $payload = ['name' => $data['name']];
         if (!empty($data['description'])) $payload['description'] = $data['description'];
@@ -573,17 +663,20 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
             ->timeout(config('uazapi.timeout', 120))
             ->asJson()
             ->post($url, $payload);
+        $this->logRequest('community', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error') ?? $res->json('message')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
         return $res->json();
     }
 
     public function groupInvitationMetadata(string $uid, string $token, string $url): array
     {
+        $startTime = microtime(true);
         $inviteCode = basename(parse_url($url, PHP_URL_PATH));
         $url = config('uazapi.base_url') . config('uazapi.endpoints.group_invitation') . '/' . $inviteCode;
         $res = Http::withHeaders(['token' => $token])
             ->timeout(config('uazapi.timeout', 60))
             ->get($url);
+        $this->logRequest('groupInvitationMetadata', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error') ?? $res->json('message')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
         return $res->json();
     }
@@ -627,10 +720,12 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function contact(string $uid, string $token, string $phone): array
     {
+        $startTime = microtime(true);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.contacts');
         $res = Http::withHeaders(['token' => $token])
             ->timeout(config('uazapi.timeout', 60))
             ->get($url);
+        $this->logRequest('contact', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('message') ?? $res->json('error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('message') ?? $res->json('error'))];
         $contacts = $res->json();
         $target = collect($contacts)->first(function ($c) use ($phone) {
@@ -642,10 +737,12 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function contacts(string $uid, string $token, array $options = []): array
     {
+        $startTime = microtime(true);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.contacts');
         $res = Http::withHeaders(['token' => $token])
             ->timeout(config('uazapi.timeout', 60))
             ->get($url);
+        $this->logRequest('contacts', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('message') ?? $res->json('error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('message') ?? $res->json('error'))];
         $data = $res->json();
         return is_array($data) ? $data : [];
@@ -653,6 +750,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function sendContact(string $uid, string $token, string $to, string $contactName, string $contactPhone, array $options = []): array
     {
+        $startTime = microtime(true);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.send_contact');
         $payload = ['number' => $to, 'fullName' => $contactName, 'phoneNumber' => $contactPhone];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
@@ -660,6 +758,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
             ->timeout(config('uazapi.timeout', 60))
             ->asJson()
             ->post($url, $payload);
+        $this->logRequest('sendContact', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error'))];
         return $res->json();
     }
@@ -728,16 +827,21 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return ['error' => 'addContacts is not supported by UAZAPI provider'];
     }
 
-    private function updateParticipants(string $token, string $groupjid, string $action, array $phones)
+    private function updateParticipants(string $token, string $groupjid, string $action, array $phones, string $uid = '')
     {
-        return Http::withHeaders(['token' => $token])
+        $startTime = microtime(true);
+        $url = config('uazapi.base_url') . '/group/updateParticipants';
+        $payload = [
+            'groupjid' => $groupjid,
+            'action' => $action,
+            'participants' => array_values($phones)
+        ];
+        $res = Http::withHeaders(['token' => $token])
             ->timeout(config('uazapi.timeout', 60))
             ->asJson()
-            ->post(config('uazapi.base_url') . '/group/updateParticipants', [
-                'groupjid' => $groupjid,
-                'action' => $action,
-                'participants' => array_values($phones)
-            ]);
+            ->post($url, $payload);
+        $this->logRequest('updateParticipants', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error') ?? $res->json('message'), 'action' => $action] : ['action' => $action], $startTime, $res, $url, $payload);
+        return $res;
     }
 
     public function showQueue(string $uid, string $token, array $options = []): array
@@ -764,6 +868,47 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
      * Configure webhooks automatically after instance creation
      * Matches WAPI original behavior
      */
+    private function logRequest(string $method, string $uid, array $context = [], ?float $startTime = null, $response = null, string $url = '', array $requestPayload = []): void
+    {
+        $durationMs = $startTime !== null ? (int)((microtime(true) - $startTime) * 1000) : null;
+
+        $logData = [
+            'method' => $method,
+            'instance_uid' => $uid,
+        ];
+
+        if ($durationMs !== null) {
+            $logData['request_time_ms'] = $durationMs;
+        }
+
+        if ($response && method_exists($response, 'status')) {
+            $logData['status_code'] = $response->status();
+            $logData['success'] = $response->successful();
+        }
+
+        $logData = array_merge($logData, $context);
+
+        if (isset($context['error'])) {
+            logger()->error("wapi-gateway.uazapi.{$method}.error", $logData);
+        } else {
+            logger()->info("wapi-gateway.uazapi.{$method}", $logData);
+        }
+
+        if (config('wapi-gateway.logging_enabled', true)) {
+            StoreDeviceLogJob::dispatch(
+                $uid,
+                'uazapi',
+                $method,
+                $url,
+                $requestPayload,
+                $response && method_exists($response, 'json') ? $response->json() : null,
+                $response && method_exists($response, 'status') ? $response->status() : null,
+                $durationMs,
+                isset($context['error']),
+            );
+        }
+    }
+
     private function configureWebhooks(string $token, int $userId, int $deviceId): void
     {
         $webhookBaseUrl = config('uazapi.webhook_base_url');

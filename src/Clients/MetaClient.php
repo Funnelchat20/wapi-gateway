@@ -7,6 +7,7 @@ use Funnelchat\WapiGateway\Contracts\InstancesContract;
 use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\TemplatesContract;
 use Funnelchat\WapiGateway\Helpers\WhatsAppCloudHelper;
+use Funnelchat\WapiGateway\Jobs\StoreDeviceLogJob;
 use Illuminate\Support\Facades\Http;
 
 class MetaClient implements MessagesContract, InstancesContract, ContactsContract, TemplatesContract
@@ -15,6 +16,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
     {
+        $startTime = microtime(true);
         $url = $this->graph . $uid . '/messages';
         $payload = [
             'messaging_product' => 'whatsapp',
@@ -24,8 +26,10 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         ];
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
+            $this->logRequest('sendText', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
             return ['error' => $res->json('error', 'Failed to send')];
         }
+        $this->logRequest('sendText', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
         return $res->json();
     }
 
@@ -45,29 +49,42 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
+        $startTime = microtime(true);
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $type = $this->mapType($ext);
         if ($type === 'invalid') return ['error' => 'Invalid file extension'];
         $payload = ['messaging_product' => 'whatsapp', 'to' => $to, 'type' => $type, $type => ['link' => $fileUrl]];
         if (isset($options['fileName']) && $type === 'document') $payload[$type]['filename'] = $options['fileName'];
         if (isset($options['caption']) && in_array($type, ['image', 'video', 'document'])) $payload[$type]['caption'] = $options['caption'];
-        $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
-        if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
+        $url = $this->graph . $uid . '/messages';
+        $res = Http::withToken($token)->post($url, $payload);
+        if ($res->failed()) {
+            $this->logRequest('sendFile', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to, 'file_type' => $ext], $startTime, $res, $url, $payload);
+            return ['error' => $res->json('error', 'Failed to send')];
+        }
+        $this->logRequest('sendFile', $uid, ['phone' => $to, 'file_type' => $ext], $startTime, $res, $url, $payload);
         return $res->json();
     }
 
     public function sendLocation(string $uid, string $token, string $to, float $lat, float $lng, array $options = []): array
     {
+        $startTime = microtime(true);
         $payload = ['messaging_product' => 'whatsapp', 'to' => $to, 'type' => 'location', 'location' => ['latitude' => $lat, 'longitude' => $lng]];
         if (isset($options['name'])) $payload['location']['name'] = $options['name'];
         if (isset($options['address'])) $payload['location']['address'] = $options['address'];
-        $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
-        if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
+        $url = $this->graph . $uid . '/messages';
+        $res = Http::withToken($token)->post($url, $payload);
+        if ($res->failed()) {
+            $this->logRequest('sendLocation', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
+            return ['error' => $res->json('error', 'Failed to send')];
+        }
+        $this->logRequest('sendLocation', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
         return $res->json();
     }
 
     public function sendButtons(string $uid, string $token, string $to, string $message, array $buttons, array $options = []): array
     {
+        $startTime = microtime(true);
         $payload = [
             'messaging_product' => 'whatsapp',
             'to' => $to,
@@ -92,13 +109,19 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             if ($mediaType === 'invalid') return ['error' => 'Invalid file extension'];
             $payload['interactive']['header'] = ['type' => $mediaType, $mediaType => ['link' => $options['fileUrl']]];
         }
-        $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
-        if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
+        $url = $this->graph . $uid . '/messages';
+        $res = Http::withToken($token)->post($url, $payload);
+        if ($res->failed()) {
+            $this->logRequest('sendButtons', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
+            return ['error' => $res->json('error', 'Failed to send')];
+        }
+        $this->logRequest('sendButtons', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
         return $res->json();
     }
 
     public function sendButtonLink(string $uid, string $token, string $to, string $message, string $url, string $label, array $options = []): array
     {
+        $startTime = microtime(true);
         $payload = [
             'messaging_product' => 'whatsapp',
             'to' => $to,
@@ -109,13 +132,19 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 'action' => ['name' => 'cta_url', 'parameters' => ['display_text' => $label, 'url' => $url]]
             ]
         ];
-        $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
-        if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
+        $requestUrl = $this->graph . $uid . '/messages';
+        $res = Http::withToken($token)->post($requestUrl, $payload);
+        if ($res->failed()) {
+            $this->logRequest('sendButtonLink', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $requestUrl, $payload);
+            return ['error' => $res->json('error', 'Failed to send')];
+        }
+        $this->logRequest('sendButtonLink', $uid, ['phone' => $to], $startTime, $res, $requestUrl, $payload);
         return $res->json();
     }
 
     public function sendOptionList(string $uid, string $token, string $to, string $message, string $buttonLabel, array $optionsList, array $extra = []): array
     {
+        $startTime = microtime(true);
         // Support both formats: with sections or flat array
         // If first element has 'rows' key, it's already in sections format
         // Otherwise, wrap it in a section
@@ -154,8 +183,13 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 ]
             ]
         ];
-        $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
-        if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
+        $url = $this->graph . $uid . '/messages';
+        $res = Http::withToken($token)->post($url, $payload);
+        if ($res->failed()) {
+            $this->logRequest('sendOptionList', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
+            return ['error' => $res->json('error', 'Failed to send')];
+        }
+        $this->logRequest('sendOptionList', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
         return $res->json();
     }
 
@@ -166,9 +200,15 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function sendLink(string $uid, string $token, string $to, string $message, string $linkUrl, array $options = []): array
     {
+        $startTime = microtime(true);
         $payload = ['messaging_product' => 'whatsapp', 'to' => $to, 'type' => 'text', 'text' => ['body' => $message . ' ' . $linkUrl]];
-        $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
-        if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
+        $url = $this->graph . $uid . '/messages';
+        $res = Http::withToken($token)->post($url, $payload);
+        if ($res->failed()) {
+            $this->logRequest('sendLink', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
+            return ['error' => $res->json('error', 'Failed to send')];
+        }
+        $this->logRequest('sendLink', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
         return $res->json();
     }
 
@@ -179,6 +219,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
     {
+        $startTime = microtime(true);
         $payload = [
             'messaging_product' => 'whatsapp',
             'to' => $to,
@@ -189,9 +230,55 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 'components' => $components
             ]
         ];
-        $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
-        if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
+        $url = $this->graph . $uid . '/messages';
+        $res = Http::withToken($token)->post($url, $payload);
+        if ($res->failed()) {
+            $this->logRequest('sendTemplate', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
+            return ['error' => $res->json('error', 'Failed to send')];
+        }
+        $this->logRequest('sendTemplate', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
         return $res->json();
+    }
+
+    private function logRequest(string $method, string $uid, array $context = [], ?float $startTime = null, $response = null, string $url = '', array $requestPayload = []): void
+    {
+        $durationMs = $startTime !== null ? (int)((microtime(true) - $startTime) * 1000) : null;
+
+        $logData = [
+            'method' => $method,
+            'instance_uid' => $uid,
+        ];
+
+        if ($durationMs !== null) {
+            $logData['request_time_ms'] = $durationMs;
+        }
+
+        if ($response && method_exists($response, 'status')) {
+            $logData['status_code'] = $response->status();
+            $logData['success'] = $response->successful();
+        }
+
+        $logData = array_merge($logData, $context);
+
+        if (isset($context['error'])) {
+            logger()->error("wapi-gateway.meta.{$method}.error", $logData);
+        } else {
+            logger()->info("wapi-gateway.meta.{$method}", $logData);
+        }
+
+        if (config('wapi-gateway.logging_enabled', true)) {
+            StoreDeviceLogJob::dispatch(
+                $uid,
+                'meta',
+                $method,
+                $url,
+                $requestPayload,
+                $response && method_exists($response, 'json') ? $response->json() : null,
+                $response && method_exists($response, 'status') ? $response->status() : null,
+                $durationMs,
+                isset($context['error']),
+            );
+        }
     }
 
     private function mapType(string $ext): string
@@ -226,6 +313,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function sendContact(string $uid, string $token, string $to, string $contactName, string $contactPhone, array $options = []): array
     {
+        $startTime = microtime(true);
         $payload = [
             'messaging_product' => 'whatsapp',
             'to' => $to,
@@ -235,13 +323,19 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 'phones' => [[ 'phone' => $contactPhone, 'wa_id' => $contactPhone ]]
             ]]
         ];
-        $res = Http::withToken($token)->post($this->graph . $uid . '/messages', $payload);
-        if ($res->failed()) return ['error' => $res->json('error', 'Failed to send')];
+        $url = $this->graph . $uid . '/messages';
+        $res = Http::withToken($token)->post($url, $payload);
+        if ($res->failed()) {
+            $this->logRequest('sendContact', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
+            return ['error' => $res->json('error', 'Failed to send')];
+        }
+        $this->logRequest('sendContact', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
         return $res->json();
     }
 
     public function listTemplates(string $wabaId, string $token, array $params = []): array
     {
+        $startTime = microtime(true);
         $url = $this->graph . $wabaId . '/message_templates';
         if (!empty($params)) {
             $query = [];
@@ -250,20 +344,30 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             $url .= '?' . http_build_query($query);
         }
         $res = Http::withToken($token)->get($url);
-        if ($res->failed()) return ['error' => $res->json('error', 'Failed to list')];
+        if ($res->failed()) {
+            $this->logRequest('listTemplates', $wabaId, ['error' => $res->json('error', 'Failed to list')], $startTime, $res, $url);
+            return ['error' => $res->json('error', 'Failed to list')];
+        }
+        $this->logRequest('listTemplates', $wabaId, [], $startTime, $res, $url);
         return $res->json();
     }
 
     public function getTemplate(string $wabaId, string $token, string $name): array
     {
+        $startTime = microtime(true);
         $url = $this->graph . $wabaId . '/message_templates?name=' . urlencode($name);
         $res = Http::withToken($token)->get($url);
-        if ($res->failed()) return ['error' => $res->json('error', 'Failed to get')];
+        if ($res->failed()) {
+            $this->logRequest('getTemplate', $wabaId, ['error' => $res->json('error', 'Failed to get')], $startTime, $res, $url);
+            return ['error' => $res->json('error', 'Failed to get')];
+        }
+        $this->logRequest('getTemplate', $wabaId, [], $startTime, $res, $url);
         return $res->json();
     }
 
     public function createTemplate(string $wabaId, string $token, array $data): array
     {
+        $startTime = microtime(true);
         $header = (!empty($data['header']) || !empty($data['file']))
             ? WhatsAppCloudHelper::getHeaderTemplate($data['type'], $data['header'] ?? null, $data['file'] ?? null, $token, $this->graph)
             : [];
@@ -277,13 +381,19 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'category' => $data['category'],
             'components' => $components
         ];
-        $res = Http::withToken($token)->post($this->graph . $wabaId . '/message_templates', $payload);
-        if ($res->failed()) return ['error' => $res->json('error', 'Failed to create')];
+        $url = $this->graph . $wabaId . '/message_templates';
+        $res = Http::withToken($token)->post($url, $payload);
+        if ($res->failed()) {
+            $this->logRequest('createTemplate', $wabaId, ['error' => $res->json('error', 'Failed to create')], $startTime, $res, $url, $payload);
+            return ['error' => $res->json('error', 'Failed to create')];
+        }
+        $this->logRequest('createTemplate', $wabaId, [], $startTime, $res, $url, $payload);
         return $res->json();
     }
 
     public function updateTemplate(string $templateUid, string $token, array $data): array
     {
+        $startTime = microtime(true);
         $header = (!empty($data['header']) || !empty($data['file']))
             ? WhatsAppCloudHelper::getHeaderTemplate($data['type'], $data['header'] ?? null, $data['file'] ?? null, $token, $this->graph)
             : [];
@@ -295,34 +405,55 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'category' => $data['category'],
             'components' => $components
         ];
-        $res = Http::withToken($token)->post($this->graph . $templateUid, $payload);
-        if ($res->failed()) return ['error' => $res->json('error', 'Failed to update')];
+        $url = $this->graph . $templateUid;
+        $res = Http::withToken($token)->post($url, $payload);
+        if ($res->failed()) {
+            $this->logRequest('updateTemplate', $templateUid, ['error' => $res->json('error', 'Failed to update')], $startTime, $res, $url, $payload);
+            return ['error' => $res->json('error', 'Failed to update')];
+        }
+        $this->logRequest('updateTemplate', $templateUid, [], $startTime, $res, $url, $payload);
         return $res->json();
     }
 
     public function deleteTemplate(string $wabaId, string $token, string $name, string $uid): array
     {
+        $startTime = microtime(true);
         $url = $this->graph . $wabaId . '/message_templates';
         $res = Http::withToken($token)->delete($url, ['name' => $name, 'hsm_id' => $uid]);
-        if ($res->failed()) return ['error' => $res->json('error', 'Failed to delete')];
+        if ($res->failed()) {
+            $this->logRequest('deleteTemplate', $wabaId, ['error' => $res->json('error', 'Failed to delete')], $startTime, $res, $url);
+            return ['error' => $res->json('error', 'Failed to delete')];
+        }
+        $this->logRequest('deleteTemplate', $wabaId, [], $startTime, $res, $url);
         return $res->json();
     }
 
     public function uploadHeaderHandle(string $token, string $fileKey): array
     {
+        $startTime = microtime(true);
+        $appId = env('META_APP_ID');
         $fileUrl = env('AWS_BUCKET_URL') . '/' . $fileKey;
         $fileContent = @file_get_contents($fileUrl);
         if ($fileContent === false) return ['error' => 'File not found'];
         $fileSize = strlen($fileContent);
         $finfo = new \finfo(FILEINFO_MIME_TYPE);
         $fileMimeType = $finfo->buffer($fileContent);
-        $session = Http::withToken($token)->post($this->graph . env('META_APP_ID') . '/uploads?file_length=' . $fileSize . '&file_type=' . $fileMimeType, []);
-        if ($session->failed() || $session->json('error')) return ['error' => $session->json('error')];
+        $sessionUrl = $this->graph . $appId . '/uploads?file_length=' . $fileSize . '&file_type=' . $fileMimeType;
+        $session = Http::withToken($token)->post($sessionUrl, []);
+        if ($session->failed() || $session->json('error')) {
+            $this->logRequest('uploadHeaderHandle', $appId, ['error' => $session->json('error')], $startTime, $session, $sessionUrl);
+            return ['error' => $session->json('error')];
+        }
         $sessionId = $session->json('id');
+        $uploadUrl = $this->graph . $sessionId;
         $response = Http::withHeaders(['Authorization' => 'OAuth ' . $token, 'file_offset' => 0, 'Content-Type' => $fileMimeType])
             ->withBody($fileContent, 'application/octet-stream')
-            ->post($this->graph . $sessionId);
-        if ($response->failed() || $response->json('error')) return ['error' => $response->json('error')];
+            ->post($uploadUrl);
+        if ($response->failed() || $response->json('error')) {
+            $this->logRequest('uploadHeaderHandle', $appId, ['error' => $response->json('error')], $startTime, $response, $uploadUrl);
+            return ['error' => $response->json('error')];
+        }
+        $this->logRequest('uploadHeaderHandle', $appId, [], $startTime, $response, $uploadUrl);
         return $response->json();
     }
 }
