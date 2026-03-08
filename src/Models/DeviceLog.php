@@ -23,11 +23,13 @@ class DeviceLog extends Model
         'status_code',
         'duration_ms',
         'is_error',
+        'sent_at',
     ];
 
     protected $casts = [
         'request_payload' => 'array',
         'response_body' => 'array',
         'is_error' => 'boolean',
+        'sent_at' => 'datetime',
     ];
 }

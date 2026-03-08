@@ -774,6 +774,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     private function logRequest(string $method, string $uid, array $context = [], ?float $startTime = null, $response = null, string $url = '', array $requestPayload = []): void
     {
         $durationMs = $startTime !== null ? (int)((microtime(true) - $startTime) * 1000) : null;
+        $sentAt = $startTime !== null ? date('Y-m-d H:i:s', (int) $startTime) : now()->toDateTimeString();
 
         $logData = [
             'method' => $method,
@@ -808,6 +809,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
                 $response && method_exists($response, 'status') ? $response->status() : null,
                 $durationMs,
                 isset($context['error']),
+                $sentAt,
             );
         }
     }

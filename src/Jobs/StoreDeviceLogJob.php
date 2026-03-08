@@ -27,6 +27,7 @@ class StoreDeviceLogJob implements ShouldQueue
         private ?int $statusCode,
         private ?int $durationMs,
         private bool $isError,
+        private ?string $sentAt = null,
     ) {
         $this->onQueue('device-logs');
     }
@@ -43,6 +44,7 @@ class StoreDeviceLogJob implements ShouldQueue
             'status_code' => $this->statusCode,
             'duration_ms' => $this->durationMs,
             'is_error' => $this->isError,
+            'sent_at' => $this->sentAt,
         ]);
     }
 
