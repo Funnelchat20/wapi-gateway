@@ -357,26 +357,31 @@ Log::warning('UAZAPI webhook configuration skipped: WEBHOOK_BASE_URL not configu
 
 ## Device Logging (Request/Response a DB)
 
-El SDK loggea automáticamente cada request HTTP a los proveedores en la tabla `device_logs`, incluyendo el payload enviado y la respuesta recibida.
+El SDK puede loggear cada request HTTP a los proveedores en la tabla `device_logs`, incluyendo el payload enviado y la respuesta recibida. El logging está **deshabilitado por defecto** — solo se activa explícitamente en el proyecto que lo necesite.
 
 ### Configuración
 
 ```env
-# Habilitar/deshabilitar logging a DB (habilitado por defecto)
+# Habilitar logging a DB (deshabilitado por defecto)
 WAPI_GATEWAY_LOGGING_ENABLED=true
 
 # Conexión de base de datos a usar (por defecto: mysql)
 WAPI_GATEWAY_DATABASE_CONNECTION=mysql
 ```
 
+> **Importante:** No habilites `WAPI_GATEWAY_LOGGING_ENABLED=true` sin antes publicar y correr la migración. Con `queue: sync` (común en desarrollo), el job fallará directamente si la tabla no existe.
+
 ### Migración
 
-Publicar y correr la migración:
+La migración **no se ejecuta automáticamente** al instalar el paquete. Solo debe publicarse en el proyecto que será dueño de la tabla `device_logs` (actualmente `user-api`):
 
 ```bash
+# Solo en user-api:
 php artisan vendor:publish --tag=wapi-migrations
 php artisan migrate
 ```
+
+Los demás proyectos que usen el paquete (`new-groups`, `sync-group-api`, etc.) no necesitan publicar la migración — solo configurar `WAPI_GATEWAY_DATABASE_CONNECTION` apuntando a la misma base de datos donde `user-api` creó la tabla.
 
 ### Estructura de la tabla `device_logs`
 
@@ -385,12 +390,13 @@ php artisan migrate
 | `instance_uid` | string | UID de la instancia de WhatsApp |
 | `provider` | string | Proveedor usado (`zapi`, `uazapi`, `funapi`, `meta`) |
 | `method` | string | Método ejecutado (`sendText`, `status`, `createGroup`, etc.) |
-| `url` | string | URL completa del request HTTP |
+| `url` | text | URL completa del request HTTP |
 | `request_payload` | json | Body enviado al proveedor (ej: `{"phone": "549...", "message": "Hola"}`) |
 | `response_body` | json | Respuesta del proveedor |
-| `status_code` | int | Código HTTP de respuesta |
+| `status_code` | smallint | Código HTTP de respuesta |
 | `duration_ms` | int | Tiempo de respuesta en milisegundos |
 | `is_error` | boolean | Si el request resultó en error |
+| `sent_at` | timestamp | Fecha y hora real del request HTTP (distinto de `created_at` que es cuando se persistió el registro) |
 
 ### Queue
 
@@ -400,10 +406,17 @@ Los logs se despachan vía el job `StoreDeviceLogJob` en la cola `device-logs`. 
 php artisan queue:work --queue=device-logs
 ```
 
+El dispatch del job está protegido con try-catch — si la infraestructura de cola falla (Redis caído, etc.), el error se loggea pero no interrumpe la operación de WhatsApp que lo originó.
+
+### Protección contra payloads grandes
+
+Los payloads de request y response se truncan automáticamente si superan 200KB (para evitar exceder el límite de 256KB de SQS). Cuando esto ocurre, el campo almacena `{"_truncated": true, "original_size": 350000}`.
+
 ### Notas
 - Los métodos GET (`status`, `qrCode`, `me`, `contact`, etc.) registran `request_payload` como `[]` ya que no envían body.
 - Los métodos POST (`sendText`, `sendFile`, `createGroup`, `addContacts`, etc.) registran el payload completo enviado al proveedor.
 - El logging es asíncrono y no impacta el tiempo de respuesta de las operaciones.
+- El job usa 3 reintentos con backoff progresivo (5s, 15s, 30s) y timeout de 10s.
 
 ## Sistema de Resources
 
@@ -510,9 +523,23 @@ class WhatsAppController extends Controller
 - ✨ Métodos de grupos: `adGroups()`, `groupInvitationMetadata()`, `groupInvitationLink()`, `lightGroupMetadata()`, `groupMetadata()`
 - ✨ Método `pinMessage()` en MessagesContract
 - ✨ Device Logging: `StoreDeviceLogJob` registra request payload y response en tabla `device_logs` vía cola asíncrona
+- ✨ Campo `sent_at` en `device_logs` para capturar fecha/hora real del request HTTP
+- ✨ Migración publicable vía `--tag=wapi-migrations` (solo para el proyecto dueño de la tabla)
+- ✨ Trait `LogsDeviceRequests` — elimina ~160 líneas duplicadas entre los 4 clientes
 
 **Fixed:**
 - 🐛 `request_payload` en `device_logs` ahora contiene el body HTTP real enviado al proveedor en todos los métodos POST (antes se guardaba `[]`)
+- 🐛 `StoreDeviceLogJob::dispatch()` envuelto en try-catch para no interrumpir operaciones de WhatsApp si la cola falla
+- 🐛 Payloads >200KB se truncan automáticamente para no exceder límite de SQS (256KB)
+- 🐛 `ZApiClient::create()` ahora pasa `instance_uid` correctamente (antes pasaba string vacío)
+- 🐛 Variable de entorno `WAPI_GATEWAY_DATABASE_CONNECTION` consistente entre config y README
+- 🐛 `$backoff` corregido de `[5, 15]` a `[5, 15, 30]` para matchear `$tries = 3`
+- 🐛 Métodos `sendFile`, `sendLocation`, y newsletter updates en FunapiClient/ZApiClient ahora logean el payload del request
+
+**Changed:**
+- 🔧 Default de `logging_enabled` cambiado de `true` a `false` (opt-in explícito)
+- 🔧 Migración no se auto-carga — solo se publica en el proyecto que la necesite (`user-api`)
+- 🔧 Casts de `DeviceLog` ampliados: `status_code => integer`, `duration_ms => integer`
 
 ### v0.2.0 - 2025-01-XX
 

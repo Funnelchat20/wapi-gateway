@@ -15,7 +15,7 @@ class StoreDeviceLogJob implements ShouldQueue
 
     public int $tries = 3;
     public int $timeout = 10;
-    public array $backoff = [5, 15];
+    public array $backoff = [5, 15, 30];
 
     public function __construct(
         private string $instanceUid,
@@ -50,7 +50,7 @@ class StoreDeviceLogJob implements ShouldQueue
 
     public function failed(\Throwable $exception): void
     {
-        logger()->error('StoreDeviceLogJob failed', [
+        logger()->error('store-device-log.failed', [
             'instance_uid' => $this->instanceUid,
             'provider' => $this->provider,
             'method' => $this->method,

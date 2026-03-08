@@ -39,6 +39,10 @@ class WapiServiceProvider extends ServiceProvider
             __DIR__ . '/../../config/wapi-gateway.php' => config_path('wapi-gateway.php'),
         ], 'wapi-config');
 
+        $this->publishes([
+            __DIR__ . '/../../database/migrations/' => database_path('migrations'),
+        ], 'wapi-migrations');
+
         $this->app->singleton('wapi.gateway', function ($app) {
             return new GatewayManager(new ZApiClient(), new UazapiClient(), new MetaClient(), new FunapiClient());
         });

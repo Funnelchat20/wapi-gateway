@@ -18,11 +18,18 @@ use Funnelchat\WapiGateway\Resources\Zapi\GroupsResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CreateGroupResource;
 use Funnelchat\WapiGateway\Jobs\StoreDeviceLogJob;
+use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Client\ConnectionException;
 
 class FunapiClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract
 {
+    use LogsDeviceRequests;
+
+    protected function getProviderName(): string
+    {
+        return 'funapi';
+    }
     // Status constants for compatibility with WAPI
     private const YOU_ARE_NOT_CONNECTED = 'You are not connected.';
     private const YOU_NEED_TO_RESTORE_SESSION = 'You need to restore the session.';
@@ -305,11 +312,11 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
         if ($res->failed() || $res->json('error')) {
             $error = $this->formatError($res->json('error', 'error'));
             $context['error'] = $error;
-            $this->logRequest('sendFile', $uid, $context, $startTime, $res, $url);
+            $this->logRequest('sendFile', $uid, $context, $startTime, $res, $url, $params);
             return ['error' => $error];
         }
 
-        $this->logRequest('sendFile', $uid, $context, $startTime, $res, $url);
+        $this->logRequest('sendFile', $uid, $context, $startTime, $res, $url, $params);
         return MessageResource::make($res->json());
     }
 
@@ -324,7 +331,7 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
         $url = $this->buildUrl($uid, $token, 'send-location');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(120)->post($url, $params);
-        $this->logRequest('sendLocation', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
+        $this->logRequest('sendLocation', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $params);
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error', 'error'))];
         }
@@ -381,8 +388,9 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
     {
         $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'update-newsletter-name');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->put($url, ['id' => $id, 'name' => $name]);
-        $this->logRequest('updateNewsletterName', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
+        $payload = ['id' => $id, 'name' => $name];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->put($url, $payload);
+        $this->logRequest('updateNewsletterName', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
@@ -391,8 +399,9 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
     {
         $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'update-newsletter-description');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->put($url, ['id' => $id, 'description' => $description]);
-        $this->logRequest('updateNewsletterDescription', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
+        $payload = ['id' => $id, 'description' => $description];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->put($url, $payload);
+        $this->logRequest('updateNewsletterDescription', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
@@ -401,8 +410,9 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
     {
         $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'update-newsletter-picture');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->put($url, ['id' => $id, 'picture' => $photoUrl]);
-        $this->logRequest('updateNewsletterPicture', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
+        $payload = ['id' => $id, 'picture' => $photoUrl];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->put($url, $payload);
+        $this->logRequest('updateNewsletterPicture', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
@@ -771,59 +781,6 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
         $this->logRequest('deleteMessage', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
-    }
-
-    /**
-     * Log request with performance metrics
-     *
-     * @param string $method The method name being executed
-     * @param string $uid Instance UID
-     * @param array $context Additional context data
-     * @param float|null $startTime Start time for duration calculation
-     * @param mixed $response Response object or data
-     * @return void
-     */
-    private function logRequest(string $method, string $uid, array $context = [], ?float $startTime = null, $response = null, string $url = '', array $requestPayload = []): void
-    {
-        $durationMs = $startTime !== null ? (int)((microtime(true) - $startTime) * 1000) : null;
-        $sentAt = $startTime !== null ? date('Y-m-d H:i:s', (int) $startTime) : now()->toDateTimeString();
-
-        $logData = [
-            'method' => $method,
-            'instance_uid' => $uid,
-        ];
-
-        if ($durationMs !== null) {
-            $logData['request_time_ms'] = $durationMs;
-        }
-
-        if ($response && method_exists($response, 'status')) {
-            $logData['status_code'] = $response->status();
-            $logData['success'] = $response->successful();
-        }
-
-        $logData = array_merge($logData, $context);
-
-        if (isset($context['error'])) {
-            logger()->error("wapi-gateway.funapi.{$method}.error", $logData);
-        } else {
-            logger()->info("wapi-gateway.funapi.{$method}", $logData);
-        }
-
-        if (config('wapi-gateway.logging_enabled', true)) {
-            StoreDeviceLogJob::dispatch(
-                $uid,
-                'funapi',
-                $method,
-                $url,
-                $requestPayload,
-                $response && method_exists($response, 'json') ? $response->json() : null,
-                $response && method_exists($response, 'status') ? $response->status() : null,
-                $durationMs,
-                isset($context['error']),
-                $sentAt,
-            );
-        }
     }
 
     private function formatError(string $error): string

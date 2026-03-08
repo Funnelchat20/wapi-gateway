@@ -8,10 +8,17 @@ use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\TemplatesContract;
 use Funnelchat\WapiGateway\Helpers\WhatsAppCloudHelper;
 use Funnelchat\WapiGateway\Jobs\StoreDeviceLogJob;
+use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Illuminate\Support\Facades\Http;
 
 class MetaClient implements MessagesContract, InstancesContract, ContactsContract, TemplatesContract
 {
+    use LogsDeviceRequests;
+
+    protected function getProviderName(): string
+    {
+        return 'meta';
+    }
     private string $graph = 'https://graph.facebook.com/v20.0/';
 
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
@@ -238,49 +245,6 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         }
         $this->logRequest('sendTemplate', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
         return $res->json();
-    }
-
-    private function logRequest(string $method, string $uid, array $context = [], ?float $startTime = null, $response = null, string $url = '', array $requestPayload = []): void
-    {
-        $durationMs = $startTime !== null ? (int)((microtime(true) - $startTime) * 1000) : null;
-        $sentAt = $startTime !== null ? date('Y-m-d H:i:s', (int) $startTime) : now()->toDateTimeString();
-
-        $logData = [
-            'method' => $method,
-            'instance_uid' => $uid,
-        ];
-
-        if ($durationMs !== null) {
-            $logData['request_time_ms'] = $durationMs;
-        }
-
-        if ($response && method_exists($response, 'status')) {
-            $logData['status_code'] = $response->status();
-            $logData['success'] = $response->successful();
-        }
-
-        $logData = array_merge($logData, $context);
-
-        if (isset($context['error'])) {
-            logger()->error("wapi-gateway.meta.{$method}.error", $logData);
-        } else {
-            logger()->info("wapi-gateway.meta.{$method}", $logData);
-        }
-
-        if (config('wapi-gateway.logging_enabled', true)) {
-            StoreDeviceLogJob::dispatch(
-                $uid,
-                'meta',
-                $method,
-                $url,
-                $requestPayload,
-                $response && method_exists($response, 'json') ? $response->json() : null,
-                $response && method_exists($response, 'status') ? $response->status() : null,
-                $durationMs,
-                isset($context['error']),
-                $sentAt,
-            );
-        }
     }
 
     private function mapType(string $ext): string

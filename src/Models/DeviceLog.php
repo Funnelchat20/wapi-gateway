@@ -31,5 +31,7 @@ class DeviceLog extends Model
         'response_body' => 'array',
         'is_error' => 'boolean',
         'sent_at' => 'datetime',
+        'status_code' => 'integer',
+        'duration_ms' => 'integer',
     ];
 }

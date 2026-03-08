@@ -18,11 +18,18 @@ use Funnelchat\WapiGateway\Resources\Zapi\GroupsResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CreateGroupResource;
 use Funnelchat\WapiGateway\Jobs\StoreDeviceLogJob;
+use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Client\ConnectionException;
 
 class ZApiClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract
 {
+    use LogsDeviceRequests;
+
+    protected function getProviderName(): string
+    {
+        return 'zapi';
+    }
     private static function baseUrl(): string
     {
         return config('zapi.zapi_url', 'https://api.z-api.io/instances/UID/token/TOKEN/ACTION');
@@ -99,7 +106,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
         $url = config('zapi.on_demand_url');
         $res = Http::withToken(config('zapi.token'))->post($url, $payload);
-        $this->logRequest('create', '', $res->failed() ? ['error' => $res->json('error', 'Failed to create instance')] : [], $startTime, $res, $url, $payload);
+        $this->logRequest('create', "U-{$userId}-D-{$deviceId}", $res->failed() ? ['error' => $res->json('error', 'Failed to create instance')] : [], $startTime, $res, $url, $payload);
 
         if ($res->failed()) {
             return ['error' => $res->json('error', 'Failed to create instance')];
@@ -761,59 +768,6 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return ['success' => true];
     }
 
-    /**
-     * Log request with performance metrics
-     *
-     * @param string $method The method name being executed
-     * @param string $uid Instance UID
-     * @param array $context Additional context data
-     * @param float|null $startTime Start time for duration calculation
-     * @param mixed $response Response object or data
-     * @return void
-     */
-    private function logRequest(string $method, string $uid, array $context = [], ?float $startTime = null, $response = null, string $url = '', array $requestPayload = []): void
-    {
-        $durationMs = $startTime !== null ? (int)((microtime(true) - $startTime) * 1000) : null;
-        $sentAt = $startTime !== null ? date('Y-m-d H:i:s', (int) $startTime) : now()->toDateTimeString();
-
-        $logData = [
-            'method' => $method,
-            'instance_uid' => $uid,
-        ];
-
-        if ($durationMs !== null) {
-            $logData['request_time_ms'] = $durationMs;
-        }
-
-        if ($response && method_exists($response, 'status')) {
-            $logData['status_code'] = $response->status();
-            $logData['success'] = $response->successful();
-        }
-
-        $logData = array_merge($logData, $context);
-
-        if (isset($context['error'])) {
-            logger()->error("wapi-gateway.zapi.{$method}.error", $logData);
-        } else {
-            logger()->info("wapi-gateway.zapi.{$method}", $logData);
-        }
-
-        if (config('wapi-gateway.logging_enabled', true)) {
-            StoreDeviceLogJob::dispatch(
-                $uid,
-                'zapi',
-                $method,
-                $url,
-                $requestPayload,
-                $response && method_exists($response, 'json') ? $response->json() : null,
-                $response && method_exists($response, 'status') ? $response->status() : null,
-                $durationMs,
-                isset($context['error']),
-                $sentAt,
-            );
-        }
-    }
-
     private function formatError(string $error): string
     {
         return match ($error) {
@@ -885,8 +839,9 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     {
         $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'update-newsletter-name'], self::baseUrl());
-        $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(config('zapi.timeout', 120))->put($url, ['id' => $id, 'name' => $name]);
-        $this->logRequest('updateNewsletterName', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
+        $payload = ['id' => $id, 'name' => $name];
+        $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(config('zapi.timeout', 120))->put($url, $payload);
+        $this->logRequest('updateNewsletterName', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
@@ -895,8 +850,9 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     {
         $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'update-newsletter-description'], self::baseUrl());
-        $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(config('zapi.timeout', 120))->put($url, ['id' => $id, 'description' => $description]);
-        $this->logRequest('updateNewsletterDescription', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
+        $payload = ['id' => $id, 'description' => $description];
+        $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(config('zapi.timeout', 120))->put($url, $payload);
+        $this->logRequest('updateNewsletterDescription', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
@@ -905,8 +861,9 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     {
         $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'update-newsletter-picture'], self::baseUrl());
-        $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(config('zapi.timeout', 120))->put($url, ['id' => $id, 'picture' => $photoUrl]);
-        $this->logRequest('updateNewsletterPicture', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
+        $payload = ['id' => $id, 'picture' => $photoUrl];
+        $res = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->timeout(config('zapi.timeout', 120))->put($url, $payload);
+        $this->logRequest('updateNewsletterPicture', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
