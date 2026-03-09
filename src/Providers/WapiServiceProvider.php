@@ -8,6 +8,7 @@ use Funnelchat\WapiGateway\Interfaces\ServiceInterface;
 use Funnelchat\WapiGateway\Interfaces\RequestInterface;
 use Funnelchat\WapiGateway\Gateway\GatewayManager;
 use Funnelchat\WapiGateway\Clients\ZApiClient;
+use Funnelchat\WapiGateway\Clients\ZApiLiteClient;
 use Funnelchat\WapiGateway\Clients\UazapiClient;
 use Funnelchat\WapiGateway\Clients\MetaClient;
 use Funnelchat\WapiGateway\Clients\FunapiClient;
@@ -32,11 +33,12 @@ class WapiServiceProvider extends ServiceProvider
             __DIR__ . '/../../config/zapi.php' => config_path('zapi.php'),
             __DIR__ . '/../../config/uazapi.php' => config_path('uazapi.php'),
             __DIR__ . '/../../config/funapi.php' => config_path('funapi.php'),
+            __DIR__ . '/../../config/zapi-lite.php' => config_path('zapi-lite.php'),
             __DIR__ . '/../../config/constants.php' => config_path('constants.php'),
         ], 'wapi-config');
 
         $this->app->singleton('wapi.gateway', function ($app) {
-            return new GatewayManager(new ZApiClient(), new UazapiClient(), new MetaClient(), new FunapiClient());
+            return new GatewayManager(new ZApiClient(), new UazapiClient(), new MetaClient(), new FunapiClient(), new ZApiLiteClient());
         });
     }
 }
