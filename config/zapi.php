@@ -3,7 +3,7 @@
 return [
     'token' => env('ZAPI_TOKEN'),
     'client_token' => env('ZAPI_CLIENT_TOKEN'),
-    'zapi_url' => env('ZAPI_BASE_URL', 'https://api.z-api.io') . '/instances/UID/token/TOKEN/ACTION',
+    'base_url' => env('ZAPI_BASE_URL', 'https://api.z-api.io'),
     'subscription_url' => env('ZAPI_BASE_URL', 'https://api.z-api.io') . '/instances/UID/token/TOKEN/integrator/on-demand/subscription',
     'unsubscription_url' => env('ZAPI_BASE_URL', 'https://api.z-api.io') . '/instances/UID/token/TOKEN/integrator/on-demand/cancel',
     'on_demand_url' => env('ZAPI_BASE_URL', 'https://api.z-api.io') . '/instances/integrator/on-demand',
