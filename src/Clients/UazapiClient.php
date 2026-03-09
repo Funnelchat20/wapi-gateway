@@ -17,7 +17,6 @@ use Funnelchat\WapiGateway\Resources\Uazapi\ContactResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\GroupsResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\GroupResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\CreateGroupResource;
-use Funnelchat\WapiGateway\Jobs\StoreDeviceLogJob;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Illuminate\Support\Facades\Http;
 

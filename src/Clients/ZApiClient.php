@@ -17,7 +17,6 @@ use Funnelchat\WapiGateway\Resources\Zapi\ContactResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupsResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CreateGroupResource;
-use Funnelchat\WapiGateway\Jobs\StoreDeviceLogJob;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Client\ConnectionException;
@@ -728,9 +727,9 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     public function groupInvitationMetadata(string $uid, string $token, string $url): array
     {
         $startTime = microtime(true);
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'group-invitation-metadata'], $this->baseUrl());
-        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->get($url, ['url' => $url]);
-        $this->logRequest('groupInvitationMetadata', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('message') ?? $res->json('error', 'error')] : [], $startTime, $res, $url);
+        $endpoint = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'group-invitation-metadata'], $this->baseUrl());
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->get($endpoint, ['url' => $url]);
+        $this->logRequest('groupInvitationMetadata', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('message') ?? $res->json('error', 'error')] : [], $startTime, $res, $endpoint);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('message') ?? $res->json('error', 'error'))];
         return $res->json();
     }

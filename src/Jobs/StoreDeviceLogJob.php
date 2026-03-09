@@ -7,15 +7,15 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
-use Illuminate\Queue\SerializesModels;
+use function Sentry\captureException;
 
 class StoreDeviceLogJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable;
 
     public int $tries = 3;
     public int $timeout = 10;
-    public array $backoff = [5, 15, 30];
+    public array $backoff = [5, 15];
 
     public function __construct(
         private string $instanceUid,
@@ -50,6 +50,8 @@ class StoreDeviceLogJob implements ShouldQueue
 
     public function failed(\Throwable $exception): void
     {
+        captureException($exception);
+
         logger()->error('store-device-log.failed', [
             'instance_uid' => $this->instanceUid,
             'provider' => $this->provider,

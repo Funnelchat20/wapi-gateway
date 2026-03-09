@@ -17,7 +17,6 @@ use Funnelchat\WapiGateway\Resources\Zapi\ContactResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupsResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CreateGroupResource;
-use Funnelchat\WapiGateway\Jobs\StoreDeviceLogJob;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Client\ConnectionException;
@@ -884,9 +883,9 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
     public function groupInvitationMetadata(string $uid, string $token, string $url): array
     {
         $startTime = microtime(true);
-        $url = $this->buildUrl($uid, $token, 'group-invitation-metadata');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url, ['url' => $url]);
-        $this->logRequest('groupInvitationMetadata', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('message') ?? $res->json('error', 'error')] : [], $startTime, $res, $url);
+        $endpoint = $this->buildUrl($uid, $token, 'group-invitation-metadata');
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($endpoint, ['url' => $url]);
+        $this->logRequest('groupInvitationMetadata', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('message') ?? $res->json('error', 'error')] : [], $startTime, $res, $endpoint);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('message') ?? $res->json('error', 'error'))];
         return $res->json();
     }

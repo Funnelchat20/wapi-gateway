@@ -20,6 +20,7 @@ use Funnelchat\WapiGateway\Http\Resources\Zapi\RebootResource;
 use Funnelchat\WapiGateway\Http\Resources\Zapi\StatusResource;
 use Funnelchat\WapiGateway\Jobs\ContactApp\ContactSynchronizationJob;
 use Funnelchat\WapiGateway\Rules\MentionedRule;
+use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use GuzzleHttp\Exception\RequestException;
 use GuzzleHttp\Psr7\Response as Psr7Response;
 use Illuminate\Http\Client\ConnectionException;
@@ -33,6 +34,8 @@ use function Sentry\captureException;
 
 class ZApiController
 {
+    use LogsDeviceRequests;
+
     private const URL = 'https://api.z-api.io/instances/UID/token/TOKEN/ACTION';
     private const YOU_ARE_NOT_CONNECTED = 'You are not connected.';
     private const YOU_ARE_ALREADY_CONNECTED = 'You are already connected.';
@@ -49,24 +52,22 @@ class ZApiController
         $this->token = request()->header('token');
     }
 
+    protected function getProviderName(): string
+    {
+        return 'zapi';
+    }
+
     private function sendHttpRequest(string $method, array $params, string $action): \Illuminate\Http\Client\Response
     {
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$this->uid, $this->token, $action], self::URL);
+        $startTime = microtime(true);
         try {
             $response = Http::withHeaders(['Client-Token' => env('ZAPI_CLIENT_TOKEN')])
                 ->timeout(120)
                 ->{$method}($url, $params);
-            info('deviceUid #' . $this->uid . ' ZApiController::sendHttpRequest', [
-                'method' => $method,
-                'url' => $url,
-                'params' => $params,
-                'status' => $response->status(),
-                'response' => $response->json()
-            ]);
+            $this->logRequest($action, $this->uid, [], $startTime, $response, $url, $params);
             return $response;
-        } catch (RequestException $e) {
-            return $this->handleHttpException($e, $url);
-        } catch (\Throwable $e) {
+        } catch (ConnectionException $e) {
             return $this->handleHttpException($e, $url);
         }
     }
@@ -663,7 +664,6 @@ class ZApiController
     public function communitiesMetadata(Request $request): CommunityResource|JsonResponse
     {
         $validated = $request->validate(['id' => ['string', 'required']]);
-        info('communitiesMetadata', $validated);
         $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, [], 'communities-metadata/' . $validated['id']);
         if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return new CommunityResource($response->json());
@@ -691,17 +691,14 @@ class ZApiController
 
     public function deleteMessage(Request $request): \Illuminate\Http\Response|JsonResponse
     {
-        info('deleteMessage::execute');
         $validated = $request->validate([
             'messageId' => ['string', 'required'],
             'phone' => ['string', 'required'],
             'owner' => ['bool', 'required']
         ]);
-        info('deleteMessage::validated', ['validated' => $validated]);
         $body = http_build_query(['messageId' => $validated['messageId'], 'phone' => $validated['phone']]) . '&owner=true';
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$this->uid, $this->token, 'messages'], self::URL);
         $url = "$url?$body";
-        info('deleteMessage::request', ['url' => $url, 'body' => $body]);
         $response = Http::withHeaders(['Client-Token' => env('ZAPI_CLIENT_TOKEN', '')])->timeout(20)->delete($url);
         if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return response()->noContent();

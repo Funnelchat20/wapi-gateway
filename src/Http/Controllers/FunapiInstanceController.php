@@ -70,12 +70,20 @@ class FunapiInstanceController extends Controller implements WhatsAppProviderIns
     {
         $instanceUid = Str::before($uid, '-');
         $url = str_replace(['UID', 'TOKEN'], [$instanceUid, $token], config('funapi.subscription_url'));
-        $response = Http::withToken(config('funapi.token'))->post($url);
-        if ($response->failed() || $response->json('error')) return response()->json([
-            'message' => 'Failed to subscribe',
-            'error' => $response->json('error')
-        ], Response::HTTP_INTERNAL_SERVER_ERROR);
-        return response()->json(['message' => 'Subscribed successfully', 'paidTill' => date('Y-m-d H:i:s', ($response->json('due') ?? 0) / 1000)]);
+        try {
+            $response = Http::withToken(config('funapi.token'))->post($url);
+            if ($response->failed() || $response->json('error')) return response()->json([
+                'message' => 'Failed to subscribe',
+                'error' => $response->json('error')
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+            return response()->json(['message' => 'Subscribed successfully', 'paidTill' => date('Y-m-d H:i:s', ($response->json('due') ?? 0) / 1000)]);
+        } catch (RequestException $e) {
+            logger()->error('deviceUid #' . $instanceUid . ' Funapi subscribe failed (RequestException)', ['uid' => $uid, 'error' => $e->getMessage()]);
+            return response()->json(['message' => $e->getMessage()], Response::HTTP_BAD_GATEWAY);
+        } catch (\Throwable $e) {
+            logger()->error('deviceUid #' . $instanceUid . ' Funapi subscribe failed (Throwable)', ['uid' => $uid, 'error' => $e->getMessage()]);
+            return response()->json(['message' => $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
     }
 
     public function unsubscribe(string $uid, string $token): JsonResponse

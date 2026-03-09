@@ -67,21 +67,14 @@ class FunapiController implements WhatsAppProviderControllerInterface
     private function sendHttpRequest(string $method, array $params, string $action): \Illuminate\Http\Client\Response
     {
         $url = $this->buildUrl($action);
+        $startTime = microtime(true);
         try {
             $response = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
                 ->timeout(config('funapi.timeout', 29))
                 ->{$method}($url, $params);
-            info('deviceUid #' . $this->uid . ' FunapiController::sendHttpRequest', [
-                'method' => $method,
-                'url' => $url,
-                'params' => $params,
-                'status' => $response->status(),
-                'response' => $response->json()
-            ]);
+            $this->logRequest($action, $this->uid, [], $startTime, $response, $url, $params);
             return $response;
-        } catch (RequestException $e) {
-            return $this->handleHttpException($e, $url);
-        } catch (\Throwable $e) {
+        } catch (ConnectionException $e) {
             return $this->handleHttpException($e, $url);
         }
     }
@@ -653,11 +646,20 @@ class FunapiController implements WhatsAppProviderControllerInterface
         ]);
         $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'communities');
         if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
-        $this->sendHttpRequest(RequestAlias::METHOD_POST, [
+        $settingsResponse = $this->sendHttpRequest(RequestAlias::METHOD_POST, [
             'communityId' => $response->json('id'),
             'whoCanAddNewGroups' => 'admins',
         ], 'communities/settings');
-        return new AdGroupResource($response->json());
+        $data = $response->json();
+        if ($settingsResponse->failed() || $settingsResponse->json('error')) {
+            logger()->warning('wapi-gateway.funapi.community.settings_failed', [
+                'instance_uid' => $this->uid,
+                'community_id' => $response->json('id'),
+                'error' => $settingsResponse->json('error'),
+            ]);
+            $data['settings_warning'] = 'Community created but settings update failed';
+        }
+        return new AdGroupResource($data);
     }
 
     public function communities(Request $request): JsonResponse|AnonymousResourceCollection
@@ -711,7 +713,14 @@ class FunapiController implements WhatsAppProviderControllerInterface
         ]);
         $body = http_build_query(['messageId' => $validated['messageId'], 'phone' => $validated['phone']]) . '&owner=true';
         $url = $this->buildUrl('messages') . '?' . $body;
-        $response = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 29))->delete($url);
+        $startTime = microtime(true);
+        try {
+            $response = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 29))->delete($url);
+            $this->logRequest('deleteMessage', $this->uid, [], $startTime, $response, $url);
+        } catch (ConnectionException $e) {
+            $this->logRequest('deleteMessage', $this->uid, ['error' => $e->getMessage()], $startTime, null, $url);
+            return response()->json(['error' => 'Connection error'], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
         if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return response()->noContent();
     }
@@ -842,9 +851,16 @@ class FunapiController implements WhatsAppProviderControllerInterface
     {
         $validated = $request->validate(['id' => ['string', 'required']]);
         $url = $this->buildUrl('delete-newsletter');
-        $response = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
-            ->timeout(config('funapi.timeout', 29))
-            ->delete($url, $validated);
+        $startTime = microtime(true);
+        try {
+            $response = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
+                ->timeout(config('funapi.timeout', 29))
+                ->delete($url, $validated);
+            $this->logRequest('deleteNewsletter', $this->uid, [], $startTime, $response, $url, $validated);
+        } catch (ConnectionException $e) {
+            $this->logRequest('deleteNewsletter', $this->uid, ['error' => $e->getMessage()], $startTime, null, $url, $validated);
+            return response()->json(['error' => 'Connection error'], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
         if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return response()->noContent();
     }
@@ -1003,7 +1019,14 @@ class FunapiController implements WhatsAppProviderControllerInterface
     private function getParticipants(string $phone): array
     {
         $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, [], 'group-metadata/' . $phone);
-        if ($response->failed() || $response->json('error') || $response->json('success') === false) return [];
+        if ($response->failed() || $response->json('error') || $response->json('success') === false) {
+            logger()->warning('wapi-gateway.funapi.getParticipants.failed', [
+                'instance_uid' => $this->uid,
+                'phone' => $phone,
+                'error' => $response->json('error'),
+            ]);
+            return [];
+        }
         $participants = $response->json('participants');
         $filteredParticipants = array_values(array_filter($participants, fn($participant) => !$participant['isSuperAdmin']));
         return array_map(fn($participant) => $participant['phone'], $filteredParticipants);
