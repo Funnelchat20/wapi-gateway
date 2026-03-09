@@ -48,4 +48,6 @@ interface WhatsAppProviderControllerInterface
     public function getQueueCount();
     public function deleteMessagesQueue(Request $request);
     public function clearQueue();
+    public function updateWebhookReceived(Request $request);
+    public function updateWebhookReceivedAndDelivery(Request $request);
 }

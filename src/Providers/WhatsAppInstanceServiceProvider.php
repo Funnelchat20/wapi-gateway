@@ -4,6 +4,7 @@ namespace Funnelchat\WapiGateway\Providers;
 
 use Illuminate\Support\ServiceProvider;
 use Funnelchat\WapiGateway\Enums\ProviderEnum;
+use Funnelchat\WapiGateway\Http\Controllers\FunapiInstanceController;
 use Funnelchat\WapiGateway\Http\Controllers\ZApiInstanceController;
 use Funnelchat\WapiGateway\Interfaces\WhatsAppProviderInstanceInterface;
 
@@ -16,7 +17,7 @@ class WhatsAppInstanceServiceProvider extends ServiceProvider
 
             $controllers = [
                 ProviderEnum::ZApi->value => ZApiInstanceController::class,
-                ProviderEnum::FunApi->value => ZApiInstanceController::class,
+                ProviderEnum::FunApi->value => FunapiInstanceController::class,
                 ProviderEnum::ZApiLite->value => ZApiInstanceController::class,
             ];
 

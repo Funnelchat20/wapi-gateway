@@ -18,6 +18,7 @@ use Funnelchat\WapiGateway\Http\Resources\Zapi\QrCodeResource;
 use Funnelchat\WapiGateway\Http\Resources\Zapi\QueuedMessageResource;
 use Funnelchat\WapiGateway\Http\Resources\Zapi\RebootResource;
 use Funnelchat\WapiGateway\Http\Resources\Zapi\StatusResource;
+use Funnelchat\WapiGateway\Interfaces\WhatsAppProviderControllerInterface;
 use Funnelchat\WapiGateway\Jobs\ContactApp\ContactSynchronizationJob;
 use Funnelchat\WapiGateway\Rules\MentionedRule;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
@@ -32,19 +33,24 @@ use Symfony\Component\HttpFoundation\Request as RequestAlias;
 use Symfony\Component\HttpFoundation\Response;
 use function Sentry\captureException;
 
-class ZApiController
+class FunapiController implements WhatsAppProviderControllerInterface
 {
     use LogsDeviceRequests;
 
-    private const URL = 'https://api.z-api.io/instances/UID/token/TOKEN/ACTION';
     private const YOU_ARE_NOT_CONNECTED = 'You are not connected.';
     private const YOU_ARE_ALREADY_CONNECTED = 'You are already connected.';
     private const PENDING_SUBSCRIPTION = 'To continue sending a message, you must subscribe to this instance again';
     private const QR_CODE_RETRIEVAL_ERROR_MESSAGE = 'Error retrieving QR code value.';
     private const INSTANCE_STATUSES = [self::YOU_ARE_ALREADY_CONNECTED, self::YOU_ARE_NOT_CONNECTED];
     private const GROUP_CREATED_PHONE_MISSING_MESSAGE = 'Group created, but phone is missing. Admins not added.';
+
     private string|null|object $uid;
     private string|array|null $token;
+
+    protected function getProviderName(): string
+    {
+        return 'funapi';
+    }
 
     public function __construct()
     {
@@ -52,18 +58,19 @@ class ZApiController
         $this->token = request()->header('token');
     }
 
-    protected function getProviderName(): string
+    private function buildUrl(string $action): string
     {
-        return 'zapi';
+        $baseUrl = rtrim(config('funapi.base_url'), '/');
+        return "{$baseUrl}/instances/{$this->uid}/token/{$this->token}/{$action}";
     }
 
     private function sendHttpRequest(string $method, array $params, string $action): \Illuminate\Http\Client\Response
     {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$this->uid, $this->token, $action], self::URL);
+        $url = $this->buildUrl($action);
         $startTime = microtime(true);
         try {
-            $response = Http::withHeaders(['Client-Token' => env('ZAPI_CLIENT_TOKEN')])
-                ->timeout(120)
+            $response = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
+                ->timeout(config('funapi.timeout', 29))
                 ->{$method}($url, $params);
             $this->logRequest($action, $this->uid, [], $startTime, $response, $url, $params);
             return $response;
@@ -74,17 +81,17 @@ class ZApiController
 
     public function status(Request $request): JsonResponse|StatusResource
     {
-        $response = self::sendHttpRequest(RequestAlias::METHOD_GET, [], 'status');
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, [], 'status');
         if ($response->failed()) {
             $error = $response->json('error');
-            if ($error === self::PENDING_SUBSCRIPTION) return new StatusResource(['accountStatus' => self::getFormattedError(self::PENDING_SUBSCRIPTION)]);
-            if ($error && !in_array($error, self::INSTANCE_STATUSES)) return response()->json(['error' => self::getFormattedError($error)], Response::HTTP_CONFLICT);
+            if ($error === self::PENDING_SUBSCRIPTION) return new StatusResource(['accountStatus' => $this->getFormattedError(self::PENDING_SUBSCRIPTION)]);
+            if ($error && !in_array($error, self::INSTANCE_STATUSES)) return response()->json(['error' => $this->getFormattedError($error)], Response::HTTP_CONFLICT);
         }
         $data = $response->json();
         $data['accountStatus'] = 'authenticated';
-        if ($data['error'] == self::YOU_ARE_NOT_CONNECTED) {
+        if (($data['error'] ?? null) == self::YOU_ARE_NOT_CONNECTED) {
             $data['accountStatus'] = 'got qr code';
-            $tmp = self::sendHttpRequest(RequestAlias::METHOD_GET, [], 'qr-code/image');
+            $tmp = $this->sendHttpRequest(RequestAlias::METHOD_GET, [], 'qr-code/image');
             if (isset($tmp['error'])) return response()->json(['error' => $tmp['error']], Response::HTTP_CONFLICT);
             if (!isset($tmp['value'])) return response()->json(['error' => self::QR_CODE_RETRIEVAL_ERROR_MESSAGE], Response::HTTP_CONFLICT);
             $data['qrCode'] = $tmp['value'];
@@ -95,44 +102,44 @@ class ZApiController
     public function checkPhone(Request $request): CheckPhoneResource|JsonResponse
     {
         $validated = $request->validate(['phone' => ['string', 'required']]);
-        $response = self::sendHttpRequest(RequestAlias::METHOD_GET, $validated, 'phone-exists/' . $validated['phone']);
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, $validated, 'phone-exists/' . $validated['phone']);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return new CheckPhoneResource($response->json());
     }
 
     public function qrCode(Request $request): QrCodeResource|JsonResponse
     {
-        $response = self::sendHttpRequest(RequestAlias::METHOD_GET, [], 'qr-code/image');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, [], 'qr-code/image');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return new QrCodeResource($response->json());
     }
 
     public function logout(Request $request): JsonResponse|LogOutResource
     {
-        $response = self::sendHttpRequest(RequestAlias::METHOD_GET, [], 'disconnect');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, [], 'disconnect');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return new LogOutResource($response->json());
     }
 
     public function reboot(Request $request): RebootResource|JsonResponse
     {
-        $response = self::sendHttpRequest(RequestAlias::METHOD_GET, [], 'restart');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, [], 'restart');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return new RebootResource($response->json());
     }
 
     public function me(Request $request): MeResource|JsonResponse
     {
-        $response = self::sendHttpRequest(RequestAlias::METHOD_GET, [], 'device');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, [], 'device');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return new MeResource($response->json());
     }
 
     public function contact(Request $request): ContactResource|JsonResponse
     {
         $validated = $request->validate(['phone' => ['string', 'required']]);
-        $response = self::sendHttpRequest(RequestAlias::METHOD_GET, $validated, 'contacts/' . $validated['phone']);
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('message') ?? $response->json('error'))], Response::HTTP_CONFLICT);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, $validated, 'contacts/' . $validated['phone']);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('message') ?? $response->json('error'))], Response::HTTP_CONFLICT);
         return new ContactResource($response->json());
     }
 
@@ -151,8 +158,8 @@ class ZApiController
             return response()->noContent();
         }
         $validated['pageSize'] = $validated['pageSize'] ?? 50;
-        $response = self::sendHttpRequest(RequestAlias::METHOD_GET, $validated, 'contacts');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('message') ?? $response->json('error'))], Response::HTTP_CONFLICT);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, $validated, 'contacts');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('message') ?? $response->json('error'))], Response::HTTP_CONFLICT);
         return ContactResource::collection($response->collect());
     }
 
@@ -168,10 +175,10 @@ class ZApiController
         if (isset($validated['mentioned']) && !is_array($validated['mentioned'])) {
             $validated['mentioned'] = $this->getParticipants($validated['phone']);
         }
-        $response = self::sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'send-text');
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'send-text');
         if ($response->failed() || $response->json('error')) {
             return response()->json([
-                'error' => self::getFormattedError($response->json('error', 'An error has occurred'))
+                'error' => $this->getFormattedError($response->json('error', 'An error has occurred'))
             ], Response::HTTP_CONFLICT);
         }
         return new MessageResource($response->json());
@@ -189,8 +196,8 @@ class ZApiController
         if (isset($validated['mentioned']) && !is_array($validated['mentioned'])) {
             $validated['mentioned'] = $this->getParticipants($validated['phone']);
         }
-        $response = self::sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'send-contact');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'send-contact');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return new MessageResource($response->json());
     }
 
@@ -223,9 +230,9 @@ class ZApiController
         $params['async'] = true;
         $params['delayMessage'] = $validated['delayMessage'] ?? 0;
         $params['delayTyping'] = $validated['delayTyping'] ?? 0;
-        $response = self::sendHttpRequest(RequestAlias::METHOD_POST, $params, $action);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $params, $action);
         if ($response->failed() || $response->json('error')) return response()->json([
-            'error' => self::getFormattedError($response->json('error', 'An error has occurred'))
+            'error' => $this->getFormattedError($response->json('error', 'An error has occurred'))
         ], Response::HTTP_CONFLICT);
         return new MessageResource($response->json());
     }
@@ -259,8 +266,8 @@ class ZApiController
             }
         }
         if (isset($validated['delayMessage'])) $params['delayMessage'] = $validated['delayMessage'];
-        $response = self::sendHttpRequest(RequestAlias::METHOD_POST, $params, 'send-button-actions');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $params, 'send-button-actions');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return new MessageResource($response->json());
     }
 
@@ -278,8 +285,8 @@ class ZApiController
         if (isset($validated['mentioned']) && !is_array($validated['mentioned'])) {
             $validated['mentioned'] = $this->getParticipants($validated['phone']);
         }
-        $response = self::sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'send-poll');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'send-poll');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return new MessageResource($response->json());
     }
 
@@ -309,8 +316,8 @@ class ZApiController
             }
         }
         if (isset($validated['delayMessage'])) $params['delayMessage'] = $validated['delayMessage'];
-        $response = self::sendHttpRequest(RequestAlias::METHOD_POST, $params, 'send-button-list');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $params, 'send-button-list');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return new MessageResource($response->json());
     }
 
@@ -335,8 +342,8 @@ class ZApiController
             ],
         ];
         if (isset($validated['delayMessage'])) $params['delayMessage'] = $validated['delayMessage'];
-        $response = self::sendHttpRequest(RequestAlias::METHOD_POST, $params, 'send-option-list');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $params, 'send-option-list');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return new MessageResource($response->json());
     }
 
@@ -352,8 +359,8 @@ class ZApiController
             'event.callLinkType' => ['nullable', 'string', 'in:voice,video'],
             'event.canceled' => ['sometimes', 'boolean']
         ]);
-        $response = self::sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'send-event');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'send-event');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return new MessageResource($response->json());
     }
 
@@ -373,9 +380,9 @@ class ZApiController
         if (isset($validated['mentioned']) && !is_array($validated['mentioned'])) {
             $validated['mentioned'] = $this->getParticipants($validated['phone']);
         }
-        $response = self::sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'send-link');
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'send-link');
         if ($response->failed() || $response->json('error')) return response()->json([
-            'error' => self::getFormattedError($response->json('error', 'An error has occurred'))
+            'error' => $this->getFormattedError($response->json('error', 'An error has occurred'))
         ], Response::HTTP_CONFLICT);
         return new MessageResource($response->json());
     }
@@ -408,10 +415,10 @@ class ZApiController
         }
         if (isset($validated['delayMessage'])) $params['delayMessage'] = $validated['delayMessage'];
         if (isset($validated['delayTyping'])) $params['delayTyping'] = $validated['delayTyping'];
-        $response = self::sendHttpRequest(RequestAlias::METHOD_POST, $params, 'send-location');
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $params, 'send-location');
         if ($response->failed() || $response->json('error')) {
             return response()->json([
-                'error' => self::getFormattedError($response->json('error', 'An error has occurred'))
+                'error' => $this->getFormattedError($response->json('error', 'An error has occurred'))
             ], Response::HTTP_CONFLICT);
         }
         return new MessageResource($response->json());
@@ -423,11 +430,11 @@ class ZApiController
             'page' => ['int', 'sometimes'],
             'pageSize' => ['int', 'sometimes']
         ]);
-        $response = self::sendHttpRequest(RequestAlias::METHOD_GET, [
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, [
             'page' => $validated['page'] ?? 1,
             'pageSize' => $validated['pageSize'] ?? 299
         ], 'groups');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         $filteredGroups = $response->collect()
             ->filter(fn($group) => array_key_exists('communityId', $group) && empty($group['communityId']))
             ->unique('phone');
@@ -441,8 +448,8 @@ class ZApiController
             'pageSize' => ['int', 'sometimes']
         ]);
         $validated['pageSize'] = $validated['pageSize'] ?? 999;
-        $response = self::sendHttpRequest(RequestAlias::METHOD_GET, $validated, 'groups');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, $validated, 'groups');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         $filteredCommunity = $response->collect()
             ->filter(fn($group) => array_key_exists('communityId', $group) && !empty($group['communityId']));
         return GroupsAnnouncementResource::collection($filteredCommunity);
@@ -452,14 +459,14 @@ class ZApiController
     {
         $validated = $request->validate(['id' => ['string', 'required']]);
         $id = $validated['id'] . '-group';
-        $response = self::sendHttpRequest(RequestAlias::METHOD_GET, $validated, 'group-metadata/' . $id);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, $validated, 'group-metadata/' . $id);
         if ($response->failed() || $response->json('error') || $response->json('success') === false) {
             return response()->json([
-                'error' => self::getFormattedError($response->json('error', $response->json('message', 'An error has occurred')))
+                'error' => $this->getFormattedError($response->json('error', $response->json('message', 'An error has occurred')))
             ], Response::HTTP_CONFLICT);
         }
         $data = $response->json();
-        $data['image'] = self::sendHttpRequest(RequestAlias::METHOD_GET, $validated, 'chats/' . $id)->json('profileThumbnail', '');
+        $data['image'] = $this->sendHttpRequest(RequestAlias::METHOD_GET, $validated, 'chats/' . $id)->json('profileThumbnail', '');
         return new GroupResource($data);
     }
 
@@ -477,29 +484,29 @@ class ZApiController
                     : null
             ]
         ]);
-        $response = self::sendHttpRequest(RequestAlias::METHOD_POST, [
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, [
             'groupName' => $validated['name'],
             'phones' => $validated['participants'],
             'autoInvite' => true
         ], 'create-group');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         $data = $response->json();
         if (!isset($data['phone'])) {
             return response()->json(['error' => self::GROUP_CREATED_PHONE_MISSING_MESSAGE], Response::HTTP_CONFLICT);
         }
         if (isset($validated['admins'])) {
-            $response = self::sendHttpRequest(RequestAlias::METHOD_POST, [
+            $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, [
                 'groupId' => $data['phone'],
                 'phones' => $validated['admins']
             ], 'add-admin');
-            if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+            if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         }
         if (isset($validated['photo'])) {
-            $response = self::sendHttpRequest(RequestAlias::METHOD_POST, [
+            $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, [
                 'groupId' => $data['phone'],
                 'groupPhoto' => $validated['photo']
             ], 'update-group-photo');
-            if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+            if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         }
         return new CreateGroupResource($data);
     }
@@ -514,7 +521,7 @@ class ZApiController
             'groupId' => $validated['id'],
             'groupName' => $validated['name']
         ], 'update-group-name');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return response()->noContent();
     }
 
@@ -528,7 +535,7 @@ class ZApiController
             'groupId' => $validated['id'] . '-group',
             'groupDescription' => $validated['description']
         ], 'update-group-description');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return response()->noContent();
     }
 
@@ -544,7 +551,7 @@ class ZApiController
             'adminOnlyMessage' => $validated['admin_only_message'],
             'adminOnlySettings' => $validated['admin_only_settings'],
         ], 'update-group-settings');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return response()->noContent();
     }
 
@@ -558,7 +565,7 @@ class ZApiController
             'groupId' => $validated['id'],
             'groupPhoto' => $validated['photo']
         ], 'update-group-photo');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return response()->noContent();
     }
 
@@ -573,7 +580,7 @@ class ZApiController
             'groupId' => $validated['id'],
             'phones' => $validated['phones']
         ], 'add-participant');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return response()->noContent();
     }
 
@@ -587,7 +594,7 @@ class ZApiController
             'groupId' => $validated['id'],
             'phones' => $validated['phones']
         ], 'add-admin');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return response()->noContent();
     }
 
@@ -601,7 +608,7 @@ class ZApiController
             'groupId' => $validated['id'],
             'phones' => $validated['phones']
         ], 'remove-participant');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return response()->noContent();
     }
 
@@ -615,7 +622,7 @@ class ZApiController
             'groupId' => $validated['id'],
             'phones' => $validated['phones']
         ], 'remove-admin');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return response()->noContent();
     }
 
@@ -627,7 +634,7 @@ class ZApiController
         $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, [
             'groupId' => $validated['id'] . '-group'
         ], 'leave-group');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return response()->noContent();
     }
 
@@ -636,15 +643,23 @@ class ZApiController
         $validated = $request->validate([
             'name' => ['string', 'required'],
             'description' => ['string', 'sometimes'],
-            ''
         ]);
         $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'communities');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
-        $this->sendHttpRequest(RequestAlias::METHOD_POST, [
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        $settingsResponse = $this->sendHttpRequest(RequestAlias::METHOD_POST, [
             'communityId' => $response->json('id'),
             'whoCanAddNewGroups' => 'admins',
         ], 'communities/settings');
-        return new AdGroupResource($response->json());
+        $data = $response->json();
+        if ($settingsResponse->failed() || $settingsResponse->json('error')) {
+            logger()->warning('wapi-gateway.funapi.community.settings_failed', [
+                'instance_uid' => $this->uid,
+                'community_id' => $response->json('id'),
+                'error' => $settingsResponse->json('error'),
+            ]);
+            $data['settings_warning'] = 'Community created but settings update failed';
+        }
+        return new AdGroupResource($data);
     }
 
     public function communities(Request $request): JsonResponse|AnonymousResourceCollection
@@ -657,7 +672,7 @@ class ZApiController
             'page' => $validated['page'] ?? 1,
             'pageSize' => $validated['pageSize'] ?? 10
         ], 'communities');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return CommunityResource::collection($response->json());
     }
 
@@ -665,7 +680,7 @@ class ZApiController
     {
         $validated = $request->validate(['id' => ['string', 'required']]);
         $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, [], 'communities-metadata/' . $validated['id']);
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return new CommunityResource($response->json());
     }
 
@@ -676,7 +691,7 @@ class ZApiController
             'pageSize' => ['int', 'sometimes'],
         ]);
         $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, $validated, 'chats');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return ChatResource::collection($response->json());
     }
 
@@ -685,7 +700,7 @@ class ZApiController
         $validated = $request->validate(['phone' => ['string', 'sometimes']]);
         $validated['action'] = 'delete';
         $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'modify-chat');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return response()->noContent();
     }
 
@@ -697,10 +712,16 @@ class ZApiController
             'owner' => ['bool', 'required']
         ]);
         $body = http_build_query(['messageId' => $validated['messageId'], 'phone' => $validated['phone']]) . '&owner=true';
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$this->uid, $this->token, 'messages'], self::URL);
-        $url = "$url?$body";
-        $response = Http::withHeaders(['Client-Token' => env('ZAPI_CLIENT_TOKEN', '')])->timeout(20)->delete($url);
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        $url = $this->buildUrl('messages') . '?' . $body;
+        $startTime = microtime(true);
+        try {
+            $response = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 29))->delete($url);
+            $this->logRequest('deleteMessage', $this->uid, [], $startTime, $response, $url);
+        } catch (ConnectionException $e) {
+            $this->logRequest('deleteMessage', $this->uid, ['error' => $e->getMessage()], $startTime, null, $url);
+            return response()->json(['error' => 'Connection error'], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return response()->noContent();
     }
 
@@ -713,6 +734,221 @@ class ZApiController
         }
         return $response->json();
     }
+
+    public function updateWebhookReceived(Request $request): \Illuminate\Http\Response|JsonResponse
+    {
+        $validated = $request->validate([
+            'userId' => ['int', 'required'],
+            'deviceId' => ['int', 'required'],
+            'updateReceivedAndDeliveryWebhook' => ['sometimes', 'boolean'],
+            'privateMessages' => ['sometimes', 'boolean']
+        ]);
+        $updateReceivedAndDeliveryWebhook = $validated['updateReceivedAndDeliveryWebhook'] ?? true;
+        $privateMessages = $validated['privateMessages'] ?? true;
+        $urlWebhook = config('funapi.webhook_base_url', config('app.url')) . '/webhooks/funapi/received?userId=' . $validated['userId'] . '&deviceId=' . $validated['deviceId'];
+        if ($privateMessages === false) {
+            $urlWebhook .= '&privateMessages=false';
+        }
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_PUT, ['value' => $urlWebhook], 'update-webhook-received');
+        if ($response->failed() || $response->json('error')) return response()->json([
+            'error' => $response->json('error')
+        ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        if ($updateReceivedAndDeliveryWebhook) {
+            return $this->updateWebhookReceivedAndDelivery($request);
+        }
+        return response()->noContent();
+    }
+
+    public function updateWebhookReceivedAndDelivery(Request $request): \Illuminate\Http\Response|JsonResponse
+    {
+        $validated = $request->validate([
+            'userId' => ['int', 'required'],
+            'deviceId' => ['int', 'required'],
+            'privateMessages' => ['sometimes', 'boolean']
+        ]);
+        $privateMessages = $validated['privateMessages'] ?? true;
+        $urlWebhook = config('funapi.webhook_base_url', config('app.url')) . '/webhooks/funapi/received-and-delivery?userId=' . $validated['userId'] . '&deviceId=' . $validated['deviceId'];
+        if ($privateMessages === false) {
+            $urlWebhook .= '&privateMessages=false';
+        }
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_PUT, ['value' => $urlWebhook], 'update-webhook-received-delivery');
+        if ($response->failed() || $response->json('error')) return response()->json([
+            'error' => $response->json('error')
+        ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        return response()->noContent();
+    }
+
+    public function showMessagesQueue(Request $request): JsonResponse|AnonymousResourceCollection
+    {
+        $validated = $request->validate([
+            'page' => ['int', 'sometimes'],
+            'pageSize' => ['int', 'sometimes']
+        ]);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, [
+            'page' => $validated['page'] ?? 1,
+            'pageSize' => $validated['pageSize'] ?? 499
+        ], 'queue');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return QueuedMessageResource::collection($response->json());
+    }
+
+    public function getQueueCount(): JsonResponse
+    {
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, [], 'queue/count');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return response()->json(['count' => $response->json('count')]);
+    }
+
+    public function deleteMessagesQueue(Request $request): \Illuminate\Http\Response|JsonResponse
+    {
+        $validated = $request->validate([
+            'messageQueueUid' => 'required|string'
+        ]);
+        $url = $this->buildUrl('queue/' . $validated['messageQueueUid']);
+        try {
+            $response = Http::withHeaders([
+                'accept' => 'application/json',
+                'client-token' => config('funapi.client_token'),
+            ])->delete($url);
+        } catch (ConnectionException $e) {
+            captureException($e);
+            return response()->json(['error' => 'Connection error'], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return response()->noContent();
+    }
+
+    public function clearQueue(): \Illuminate\Http\Response|JsonResponse
+    {
+        $url = $this->buildUrl('queue');
+        try {
+            $response = Http::withHeaders([
+                'accept' => 'application/json',
+                'client-token' => config('funapi.client_token'),
+            ])->delete($url);
+        } catch (ConnectionException $e) {
+            captureException($e);
+            return response()->json(['error' => 'Connection error'], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return response()->noContent();
+    }
+
+    // --- Newsletter/Channel endpoints ---
+
+    public function createNewsletter(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'name' => ['string', 'required'],
+            'description' => ['string', 'sometimes'],
+        ]);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'create-newsletter');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return response()->json($response->json());
+    }
+
+    public function deleteNewsletter(Request $request): \Illuminate\Http\Response|JsonResponse
+    {
+        $validated = $request->validate(['id' => ['string', 'required']]);
+        $url = $this->buildUrl('delete-newsletter');
+        $startTime = microtime(true);
+        try {
+            $response = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
+                ->timeout(config('funapi.timeout', 29))
+                ->delete($url, $validated);
+            $this->logRequest('deleteNewsletter', $this->uid, [], $startTime, $response, $url, $validated);
+        } catch (ConnectionException $e) {
+            $this->logRequest('deleteNewsletter', $this->uid, ['error' => $e->getMessage()], $startTime, null, $url, $validated);
+            return response()->json(['error' => 'Connection error'], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return response()->noContent();
+    }
+
+    public function newsletters(Request $request): JsonResponse
+    {
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, [], 'newsletter');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return response()->json($response->json());
+    }
+
+    public function newsletterMetadata(Request $request, string $newsletterId): JsonResponse
+    {
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, [], 'newsletter/metadata/' . $newsletterId);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return response()->json($response->json());
+    }
+
+    public function updateNewsletterName(Request $request): \Illuminate\Http\Response|JsonResponse
+    {
+        $validated = $request->validate([
+            'id' => ['string', 'required'],
+            'name' => ['string', 'required'],
+        ]);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'update-newsletter-name');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return response()->noContent();
+    }
+
+    public function updateNewsletterDescription(Request $request): \Illuminate\Http\Response|JsonResponse
+    {
+        $validated = $request->validate([
+            'id' => ['string', 'required'],
+            'description' => ['string', 'required'],
+        ]);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'update-newsletter-description');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return response()->noContent();
+    }
+
+    public function updateNewsletterPicture(Request $request): \Illuminate\Http\Response|JsonResponse
+    {
+        $validated = $request->validate([
+            'id' => ['string', 'required'],
+            'pictureUrl' => ['url', 'required'],
+        ]);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'update-newsletter-picture');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return response()->noContent();
+    }
+
+    // --- Group extra endpoints ---
+
+    public function groupInvitationLink(Request $request, string $groupId): JsonResponse
+    {
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, [], 'group-invitation-link/' . $groupId);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return response()->json($response->json());
+    }
+
+    public function lightGroupMetadata(Request $request, string $groupId): JsonResponse
+    {
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, [], 'light-group-metadata/' . $groupId);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return response()->json($response->json());
+    }
+
+    public function groupMetadata(Request $request, string $groupId): JsonResponse
+    {
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, [], 'group-metadata/' . $groupId);
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return response()->json($response->json());
+    }
+
+    // --- Pin message ---
+
+    public function pinMessage(Request $request): \Illuminate\Http\Response|JsonResponse
+    {
+        $validated = $request->validate([
+            'phone' => ['string', 'required'],
+            'pin' => ['boolean', 'required'],
+        ]);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, $validated, 'pin-message');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => $this->getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return response()->noContent();
+    }
+
+    // --- Private helpers ---
 
     private function getAction(string $ext): string
     {
@@ -764,8 +1000,9 @@ class ZApiController
         ][$ext];
     }
 
-    private function getFormattedError(string $error): string
+    private function getFormattedError(?string $error): string
     {
+        if (!$error) return 'unknown_error';
         return match ($error) {
             default => $error,
             'Instance not found' => 'instance_not_found',
@@ -781,116 +1018,24 @@ class ZApiController
 
     private function getParticipants(string $phone): array
     {
-        $response = self::sendHttpRequest(RequestAlias::METHOD_GET, [], 'group-metadata/' . $phone);
-        if ($response->failed() || $response->json('error') || $response->json('success') === false) return [];
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_GET, [], 'group-metadata/' . $phone);
+        if ($response->failed() || $response->json('error') || $response->json('success') === false) {
+            logger()->warning('wapi-gateway.funapi.getParticipants.failed', [
+                'instance_uid' => $this->uid,
+                'phone' => $phone,
+                'error' => $response->json('error'),
+            ]);
+            return [];
+        }
         $participants = $response->json('participants');
         $filteredParticipants = array_values(array_filter($participants, fn($participant) => !$participant['isSuperAdmin']));
         return array_map(fn($participant) => $participant['phone'], $filteredParticipants);
     }
 
-    public function updateWebhookReceived(Request $request): \Illuminate\Http\Response|JsonResponse
-    {
-        $validated = $request->validate([
-            'userId' => ['int', 'required'],
-            'deviceId' => ['int', 'required'],
-            'updateReceivedAndDeliveryWebhook' => ['sometimes', 'boolean'],
-            'privateMessages' => ['sometimes', 'boolean']
-        ]);
-        $updateReceivedAndDeliveryWebhook = $validated['updateReceivedAndDeliveryWebhook'] ?? true;
-        $privateMessages = $validated['privateMessages'] ?? true;
-        $urlWebhook = config('app.url') . '/webhooks/zapi/received?userId=' . $validated['userId'] . '&deviceId=' . $validated['deviceId'];
-        if ($privateMessages === false) {
-            $urlWebhook .= '&privateMessages=false';
-        }
-        $response = self::sendHttpRequest(RequestAlias::METHOD_PUT, ['value' => $urlWebhook], 'update-webhook-received');
-        if ($response->failed() || $response->json('error')) return response()->json([
-            'error' => $response->json('error')
-        ], Response::HTTP_INTERNAL_SERVER_ERROR);
-        if ($updateReceivedAndDeliveryWebhook) {
-            return $this->updateWebhookReceivedAndDelivery($request);
-        }
-        return response()->noContent();
-    }
-
-    public function updateWebhookReceivedAndDelivery(Request $request): \Illuminate\Http\Response|JsonResponse
-    {
-        $validated = $request->validate([
-            'userId' => ['int', 'required'],
-            'deviceId' => ['int', 'required'],
-            'privateMessages' => ['sometimes', 'boolean']
-        ]);
-        $privateMessages = $validated['privateMessages'] ?? true;
-        $urlWebhook = config('app.url') . '/webhooks/zapi/received-and-delivery?userId=' . $validated['userId'] . '&deviceId=' . $validated['deviceId'];
-        if ($privateMessages === false) {
-            $urlWebhook .= '&privateMessages=false';
-        }
-        $response = self::sendHttpRequest(RequestAlias::METHOD_PUT, ['value' => $urlWebhook], 'update-webhook-received-delivery');
-        if ($response->failed() || $response->json('error')) return response()->json([
-            'error' => $response->json('error')
-        ], Response::HTTP_INTERNAL_SERVER_ERROR);
-        return response()->noContent();
-    }
-
-    public function showMessagesQueue(Request $request): JsonResponse|AnonymousResourceCollection
-    {
-        $validated = $request->validate([
-            'page' => ['int', 'sometimes'],
-            'pageSize' => ['int', 'sometimes']
-        ]);
-        $response = self::sendHttpRequest(RequestAlias::METHOD_GET, [
-            'page' => $validated['page'] ?? 1,
-            'pageSize' => $validated['pageSize'] ?? 499
-        ], 'queue');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
-        return QueuedMessageResource::collection($response->json());
-    }
-
-    public function getQueueCount(): JsonResponse
-    {
-        $response = self::sendHttpRequest(RequestAlias::METHOD_GET, [], 'queue/count');
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
-        return response()->json(['count' => $response->json('count')]);
-    }
-
-    public function deleteMessagesQueue(Request $request): \Illuminate\Http\Response|JsonResponse
-    {
-        $validated = $request->validate([
-            'messageQueueUid' => 'required|string'
-        ]);
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$this->uid, $this->token, 'queue/' . $validated['messageQueueUid']], self::URL);
-        try {
-            $response = Http::withHeaders([
-                'accept' => 'application/json',
-                'client-token' => env('ZAPI_CLIENT_TOKEN'),
-            ])->delete($url);
-        } catch (ConnectionException $e) {
-            captureException($e);
-            return response()->json(['error' => 'Connection error'], Response::HTTP_INTERNAL_SERVER_ERROR);
-        }
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
-        return response()->noContent();
-    }
-
-    public function clearQueue(): \Illuminate\Http\Response|JsonResponse
-    {
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$this->uid, $this->token, 'queue'], self::URL);
-        try {
-            $response = Http::withHeaders([
-                'accept' => 'application/json',
-                'client-token' => env('ZAPI_CLIENT_TOKEN'),
-            ])->delete($url);
-        } catch (ConnectionException $e) {
-            captureException($e);
-            return response()->json(['error' => 'Connection error'], Response::HTTP_INTERNAL_SERVER_ERROR);
-        }
-        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
-        return response()->noContent();
-    }
-
     private function handleHttpException(\Throwable $e, string $url): \Illuminate\Http\Client\Response
     {
         $errorMessage = $this->getFormattedError($e->getMessage());
-        logger()->error('deviceUid #' . $this->uid . ' ZApiController sendHttpRequest ' . get_class($e) . ' error', [
+        logger()->error('deviceUid #' . $this->uid . ' FunapiController sendHttpRequest ' . get_class($e) . ' error', [
             'error' => $errorMessage,
             'deviceId' => $this->uid,
             'url' => $url
