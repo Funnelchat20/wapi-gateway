@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use Funnelchat\WapiGateway\Interfaces\WhatsAppProviderControllerInterface;
 use Funnelchat\WapiGateway\Interfaces\WhatsAppProviderInstanceInterface;
+use Funnelchat\WapiGateway\Http\Controllers\FunapiController;
 use Funnelchat\WapiGateway\Http\Controllers\ZApiInstanceController;
 
 Route::middleware('api')->prefix('api')->group(function () {
@@ -73,7 +74,26 @@ Route::middleware('api')->prefix('api')->group(function () {
                     Route::delete('', 'deleteMessagesQueue');
                     Route::delete('all', 'clearQueue');
                 });
+
+                // Webhook configuration
+                Route::put('update-webhook-received', 'updateWebhookReceived');
+                Route::put('update-webhook-received-delivery', 'updateWebhookReceivedAndDelivery');
             });
+
+        // Funapi-specific endpoints (newsletters, extra group metadata, pin)
+        Route::controller(FunapiController::class)->group(function () {
+            Route::post('create-newsletter', 'createNewsletter');
+            Route::delete('delete-newsletter', 'deleteNewsletter');
+            Route::get('newsletters', 'newsletters');
+            Route::get('newsletter/metadata/{newsletterId}', 'newsletterMetadata');
+            Route::post('update-newsletter-name', 'updateNewsletterName');
+            Route::post('update-newsletter-description', 'updateNewsletterDescription');
+            Route::post('update-newsletter-picture', 'updateNewsletterPicture');
+            Route::post('group-invitation-link/{groupId}', 'groupInvitationLink');
+            Route::get('light-group-metadata/{groupId}', 'lightGroupMetadata');
+            Route::get('group-metadata/{groupId}', 'groupMetadata');
+            Route::post('pin-message', 'pinMessage');
+        });
     });
     });
 });

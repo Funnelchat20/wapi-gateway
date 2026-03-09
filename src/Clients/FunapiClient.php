@@ -216,9 +216,20 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function checkPhone(string $uid, string $token, string $phone): array
     {
-        // Funapi does not provide a phone-exists endpoint
-        // The phone-code endpoint is for pairing, not for checking if a phone has WhatsApp
-        return ['error' => 'checkPhone() is not supported by Funapi provider'];
+        $startTime = microtime(true);
+        $url = $this->buildUrl($uid, $token, 'phone-exists/' . $phone);
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
+            ->timeout(config('funapi.timeout', 29))
+            ->get($url);
+
+        if ($res->failed() || $res->json('error')) {
+            $error = $this->formatError($res->json('error', 'error'));
+            $this->logRequest('checkPhone', $uid, ['error' => $error, 'phone' => $phone], $startTime, $res, $url, []);
+            return ['error' => $error];
+        }
+
+        $this->logRequest('checkPhone', $uid, ['phone' => $phone], $startTime, $res, $url, []);
+        return CheckPhoneResource::make($res->json());
     }
 
     public function subscribe(string $uid, string $token): array
@@ -340,37 +351,170 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
 
     public function sendButtons(string $uid, string $token, string $to, string $message, array $buttons, array $options = []): array
     {
-        return ['error' => 'sendButtons() is not yet available for Funapi provider. Development in progress.'];
+        $startTime = microtime(true);
+        $url = $this->buildUrl($uid, $token, 'send-button-list');
+        $payload = [
+            'phone' => $to,
+            'message' => $message,
+            'buttonList' => ['buttons' => $buttons],
+        ];
+        if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
+        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
+            ->timeout(config('funapi.timeout', 29))
+            ->post($url, $payload);
+
+        if ($res->failed() || $res->json('error')) {
+            $error = $this->formatError($res->json('error', 'error'));
+            $this->logRequest('sendButtons', $uid, ['error' => $error, 'phone' => $to], $startTime, $res, $url, $payload);
+            return ['error' => $error];
+        }
+
+        $this->logRequest('sendButtons', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
+        return MessageResource::make($res->json());
     }
 
     public function sendButtonLink(string $uid, string $token, string $to, string $message, string $url, string $label, array $options = []): array
     {
-        return ['error' => 'sendButtonLink() is not yet available for Funapi provider. Development in progress.'];
+        $startTime = microtime(true);
+        $endpoint = $this->buildUrl($uid, $token, 'send-button-actions');
+        $payload = [
+            'phone' => $to,
+            'message' => $message,
+            'buttonActions' => [
+                ['type' => 'URL', 'url' => $url, 'label' => $label]
+            ],
+        ];
+        if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
+        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
+            ->timeout(config('funapi.timeout', 29))
+            ->post($endpoint, $payload);
+
+        if ($res->failed() || $res->json('error')) {
+            $error = $this->formatError($res->json('error', 'error'));
+            $this->logRequest('sendButtonLink', $uid, ['error' => $error, 'phone' => $to], $startTime, $res, $endpoint, $payload);
+            return ['error' => $error];
+        }
+
+        $this->logRequest('sendButtonLink', $uid, ['phone' => $to], $startTime, $res, $endpoint, $payload);
+        return MessageResource::make($res->json());
     }
 
     public function sendOptionList(string $uid, string $token, string $to, string $message, string $buttonLabel, array $optionsList, array $extra = []): array
     {
-        return ['error' => 'sendOptionList() is not yet available for Funapi provider. Development in progress.'];
+        $startTime = microtime(true);
+        $url = $this->buildUrl($uid, $token, 'send-option-list');
+        $payload = [
+            'phone' => $to,
+            'message' => $message,
+            'optionList' => [
+                'options' => $optionsList,
+                'buttonLabel' => $buttonLabel,
+            ],
+        ];
+        if (isset($extra['delayMessage'])) $payload['delayMessage'] = (int) $extra['delayMessage'];
+
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
+            ->timeout(config('funapi.timeout', 29))
+            ->post($url, $payload);
+
+        if ($res->failed() || $res->json('error')) {
+            $error = $this->formatError($res->json('error', 'error'));
+            $this->logRequest('sendOptionList', $uid, ['error' => $error, 'phone' => $to], $startTime, $res, $url, $payload);
+            return ['error' => $error];
+        }
+
+        $this->logRequest('sendOptionList', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
+        return MessageResource::make($res->json());
     }
 
     public function sendPoll(string $uid, string $token, string $to, string $message, array $pollOptions, array $options = []): array
     {
-        return ['error' => 'sendPoll() is not yet available for Funapi provider. Development in progress.'];
+        $startTime = microtime(true);
+        $url = $this->buildUrl($uid, $token, 'send-poll');
+        $payload = [
+            'phone' => $to,
+            'message' => $message,
+            'poll' => $pollOptions,
+        ];
+        if (isset($options['pollMaxOptions'])) $payload['pollMaxOptions'] = (int) $options['pollMaxOptions'];
+        if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
+        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
+            ->timeout(config('funapi.timeout', 29))
+            ->post($url, $payload);
+
+        if ($res->failed() || $res->json('error')) {
+            $error = $this->formatError($res->json('error', 'error'));
+            $this->logRequest('sendPoll', $uid, ['error' => $error, 'phone' => $to], $startTime, $res, $url, $payload);
+            return ['error' => $error];
+        }
+
+        $this->logRequest('sendPoll', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
+        return MessageResource::make($res->json());
     }
 
     public function sendLink(string $uid, string $token, string $to, string $message, string $linkUrl, array $options = []): array
     {
-        return ['error' => 'sendLink() is not yet available for Funapi provider. Development in progress.'];
+        $startTime = microtime(true);
+        $url = $this->buildUrl($uid, $token, 'send-link');
+        $payload = [
+            'phone' => $to,
+            'message' => $message,
+            'linkUrl' => $linkUrl,
+        ];
+        if (isset($options['title'])) $payload['title'] = $options['title'];
+        if (isset($options['linkDescription'])) $payload['linkDescription'] = $options['linkDescription'];
+        if (isset($options['image'])) $payload['image'] = $options['image'];
+        if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
+        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+        if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
+
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
+            ->timeout(config('funapi.timeout', 29))
+            ->post($url, $payload);
+
+        if ($res->failed() || $res->json('error')) {
+            $error = $this->formatError($res->json('error', 'error'));
+            $this->logRequest('sendLink', $uid, ['error' => $error, 'phone' => $to], $startTime, $res, $url, $payload);
+            return ['error' => $error];
+        }
+
+        $this->logRequest('sendLink', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
+        return MessageResource::make($res->json());
     }
 
     public function sendEvent(string $uid, string $token, string $toGroupPhone, array $event, array $options = []): array
     {
-        return ['error' => 'sendEvent() is not yet available for Funapi provider. Development in progress.'];
+        $startTime = microtime(true);
+        $url = $this->buildUrl($uid, $token, 'send-event');
+        $payload = [
+            'phone' => $toGroupPhone,
+            'event' => $event,
+        ];
+
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
+            ->timeout(config('funapi.timeout', 29))
+            ->post($url, $payload);
+
+        if ($res->failed() || $res->json('error')) {
+            $error = $this->formatError($res->json('error', 'error'));
+            $this->logRequest('sendEvent', $uid, ['error' => $error, 'phone' => $toGroupPhone], $startTime, $res, $url, $payload);
+            return ['error' => $error];
+        }
+
+        $this->logRequest('sendEvent', $uid, ['phone' => $toGroupPhone], $startTime, $res, $url, $payload);
+        return MessageResource::make($res->json());
     }
 
     public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
     {
-        return ['error' => 'sendTemplate() is not yet available for Funapi provider. Development in progress.'];
+        // Templates are a WhatsApp Cloud API feature, not available on whatsmeow-based providers
+        return ['error' => 'sendTemplate() is not supported by Funapi provider. Use WhatsApp Cloud API for templates.'];
     }
 
     public function createNewsletter(string $uid, string $token, string $name, string $description): array
