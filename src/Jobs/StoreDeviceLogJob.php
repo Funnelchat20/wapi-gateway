@@ -29,7 +29,7 @@ class StoreDeviceLogJob implements ShouldQueue
         private bool $isError,
         private ?string $sentAt = null,
     ) {
-        $this->onQueue('device-logs');
+        $this->onQueue(config('wapi-gateway.device_logs_queue', 'device-logs'));
     }
 
     public function handle(): void
