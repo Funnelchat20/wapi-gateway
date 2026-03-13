@@ -624,8 +624,8 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
     public function addContacts(string $uid, string $token, array $contacts): array
     {
         $startTime = microtime(true);
-        $url = $this->buildUrl($uid, $token, 'add-contacts');
-        $payload = ['contacts' => $contacts];
+        $url = $this->buildUrl($uid, $token, 'contacts/add');
+        $payload = array_values($contacts);
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->post($url, $payload);
         $this->logRequest('addContacts', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];

@@ -9,6 +9,8 @@ class ContactResource
         return [
             "phone" => $data['phone'] ?? "",
             "name" => $data['name'] ?? "",
+            "short" => $data['short'] ?? "",
+            "notify" => $data['notify'] ?? "",
             "image" => $data['link'] ?? ""
         ];
     }
