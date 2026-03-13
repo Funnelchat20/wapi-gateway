@@ -17,6 +17,8 @@ class ContactResource
         return [
             "phone" => $phone,
             "name" => $data['contact_name'] ?? $data['contact_FirstName'] ?? "",
+            "short" => $data['short'] ?? $data['pushName'] ?? "",
+            "notify" => $data['notify'] ?? $data['pushName'] ?? "",
             "image" => "" // UAZ API doesn't provide image URLs in contact list
         ];
     }

@@ -934,8 +934,8 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     public function addContacts(string $uid, string $token, array $contacts): array
     {
         $startTime = microtime(true);
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'add-contacts'], $this->baseUrl());
-        $payload = ['contacts' => $contacts];
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'contacts/add'], $this->baseUrl());
+        $payload = array_values($contacts);
         $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 120))->post($url, $payload);
         $this->logRequest('addContacts', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
