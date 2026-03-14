@@ -257,7 +257,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         ][$ext] ?? 'invalid';
     }
 
-    public function pinMessage(string $uid, string $token, string $phone, string $messageId, int $duration): array
+    public function pinMessage(string $uid, string $token, string $phone, string $messageId, string $duration): array
     {
         return ['error' => 'Not supported'];
     }

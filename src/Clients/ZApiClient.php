@@ -942,11 +942,11 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return $res->json();
     }
 
-    public function pinMessage(string $uid, string $token, string $phone, string $messageId, int $duration): array
+    public function pinMessage(string $uid, string $token, string $phone, string $messageId, string $duration): array
     {
         $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'pin-message'], $this->baseUrl());
-        $payload = ['phone' => $phone, 'messageId' => $messageId, 'time' => $duration];
+        $payload = ['phone' => $phone, 'messageId' => $messageId, 'messageAction' => 'pin', 'pinMessageDuration' => $duration];
         $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 60))->post($url, $payload);
         $this->logRequest('pinMessage', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
