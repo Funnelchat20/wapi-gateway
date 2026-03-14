@@ -600,6 +600,14 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return ['success' => true];
     }
 
+    public function addCommunityAdmins(string $uid, string $token, string $id, array $phones): array
+    {
+        $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
+        $res = $this->updateParticipants($token, $gid, 'promote', $phones, $uid);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
+        return ['success' => true];
+    }
+
     public function removeParticipants(string $uid, string $token, string $id, array $phones): array
     {
         $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
@@ -609,6 +617,14 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
     }
 
     public function removeAdmins(string $uid, string $token, string $id, array $phones): array
+    {
+        $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
+        $res = $this->updateParticipants($token, $gid, 'demote', $phones, $uid);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
+        return ['success' => true];
+    }
+
+    public function removeCommunityAdmins(string $uid, string $token, string $id, array $phones): array
     {
         $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
         $res = $this->updateParticipants($token, $gid, 'demote', $phones, $uid);
