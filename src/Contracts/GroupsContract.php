@@ -14,8 +14,10 @@ interface GroupsContract
     public function updateGroupPhoto(string $uid, string $token, string $id, string $photoUrl): array;
     public function addParticipants(string $uid, string $token, string $id, array $phones): array;
     public function addAdmins(string $uid, string $token, string $id, array $phones): array;
+    public function addCommunityAdmins(string $uid, string $token, string $id, array $phones): array;
     public function removeParticipants(string $uid, string $token, string $id, array $phones): array;
     public function removeAdmins(string $uid, string $token, string $id, array $phones): array;
+    public function removeCommunityAdmins(string $uid, string $token, string $id, array $phones): array;
     public function leaveGroup(string $uid, string $token, string $id): array;
     public function communities(string $uid, string $token, array $options = []): array;
     public function communitiesMetadata(string $uid, string $token, string $id): array;
