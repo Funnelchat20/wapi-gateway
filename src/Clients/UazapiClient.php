@@ -839,7 +839,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return $results;
     }
 
-    public function pinMessage(string $uid, string $token, string $phone, string $messageId, int $duration): array
+    public function pinMessage(string $uid, string $token, string $phone, string $messageId, string $duration): array
     {
         return ['error' => 'pinMessage is not supported by UAZAPI provider'];
     }
