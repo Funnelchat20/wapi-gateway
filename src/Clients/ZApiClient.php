@@ -49,6 +49,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-text'], $this->baseUrl());
         $payload = ['phone' => $to, 'message' => $text];
+        if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
 
