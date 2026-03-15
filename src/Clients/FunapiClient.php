@@ -48,6 +48,7 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
         $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'send-text');
         $payload = ['phone' => $to, 'message' => $text];
+        if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
 
