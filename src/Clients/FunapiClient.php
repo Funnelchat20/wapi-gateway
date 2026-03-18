@@ -614,10 +614,10 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
     public function acceptGroupInvitation(string $uid, string $token, string $invitationUrl): array
     {
         $startTime = microtime(true);
-        $url = $this->buildUrl($uid, $token, 'enter-group');
-        $payload = ['groupLink' => $invitationUrl];
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
-        $this->logRequest('acceptGroupInvitation', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
+        $url = $this->buildUrl($uid, $token, 'accept-invite-group');
+        $url .= '?' . http_build_query(['url' => $invitationUrl]);
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
+        $this->logRequest('acceptGroupInvitation', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
     }
