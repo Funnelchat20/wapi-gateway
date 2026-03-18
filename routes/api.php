@@ -48,6 +48,7 @@ Route::middleware('api')->prefix('api')->group(function () {
                 Route::post('update-group-photo', 'updateGroupPhoto');
                 Route::post('add-participants', 'addParticipants');
                 Route::post('add-admins', 'addAdmins');
+                Route::post('accept-invite-group', 'acceptGroupInvitation');
                 Route::post('remove-participants', 'removeParticipants');
                 Route::post('remove-admins', 'removeAdmins');
                 Route::post('leave-group', 'leaveGroup');
