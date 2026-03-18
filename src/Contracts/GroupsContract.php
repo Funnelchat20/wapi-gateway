@@ -36,4 +36,5 @@ interface GroupsContract
     public function groupInvitationLink(string $uid, string $token, string $groupId): array;
     public function lightGroupMetadata(string $uid, string $token, string $groupId): array;
     public function groupMetadata(string $uid, string $token, string $groupId): array;
+    public function acceptGroupInvitation(string $uid, string $token, string $invitationUrl): array;
 }

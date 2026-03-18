@@ -50,4 +50,5 @@ interface WhatsAppProviderControllerInterface
     public function clearQueue();
     public function updateWebhookReceived(Request $request);
     public function updateWebhookReceivedAndDelivery(Request $request);
+    public function acceptGroupInvitation(Request $request);
 }

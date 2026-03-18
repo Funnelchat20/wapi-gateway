@@ -830,6 +830,11 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return $this->group($uid, $token, $groupId);
     }
 
+    public function acceptGroupInvitation(string $uid, string $token, string $invitationUrl): array
+    {
+        return ['error' => 'acceptGroupInvitation is not supported by UAZAPI provider'];
+    }
+
     public function deleteMessagesConcurrently(string $uid, string $token, array $deleteRequests): array
     {
         $results = [];

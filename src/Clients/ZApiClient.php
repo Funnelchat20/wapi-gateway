@@ -913,6 +913,17 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return $res->json();
     }
 
+    public function acceptGroupInvitation(string $uid, string $token, string $invitationUrl): array
+    {
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'enter-group'], $this->baseUrl());
+        $payload = ['groupLink' => $invitationUrl];
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->post($url, $payload);
+        $this->logRequest('acceptGroupInvitation', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return ['success' => true];
+    }
+
     public function groupInvitationLink(string $uid, string $token, string $groupId): array
     {
         $startTime = microtime(true);

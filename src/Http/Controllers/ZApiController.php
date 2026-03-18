@@ -591,6 +591,18 @@ class ZApiController
         return response()->noContent();
     }
 
+    public function acceptGroupInvitation(Request $request): \Illuminate\Http\Response|JsonResponse
+    {
+        $validated = $request->validate([
+            'url' => ['url', 'required'],
+        ]);
+        $response = self::sendHttpRequest(RequestAlias::METHOD_POST, [
+            'groupLink' => $validated['url'],
+        ], 'enter-group');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return response()->noContent();
+    }
+
     public function removeParticipants(Request $request): \Illuminate\Http\Response|JsonResponse
     {
         $validated = $request->validate([
