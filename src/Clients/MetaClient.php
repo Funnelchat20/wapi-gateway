@@ -53,6 +53,8 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     public function subscribe(string $uid, string $token): array { return ['error' => 'Not supported']; }
     public function unsubscribe(string $uid, string $token): array { return ['error' => 'Not supported']; }
     public function getParticipants(string $uid, string $token, string $phone): array { return []; }
+    public function updateWebhookReceived(string $uid, string $token, int $userId, int $deviceId, bool $privateMessages = false): array { return []; }
+    public function updateWebhookReceivedAndDelivery(string $uid, string $token, int $userId, int $deviceId): array { return []; }
 
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {

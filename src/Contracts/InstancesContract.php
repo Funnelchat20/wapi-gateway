@@ -14,4 +14,8 @@ interface InstancesContract
     public function subscribe(string $uid, string $token): array;
     public function unsubscribe(string $uid, string $token): array;
     public function getParticipants(string $uid, string $token, string $phone): array;
+
+    public function updateWebhookReceived(string $uid, string $token, int $userId, int $deviceId, bool $privateMessages = false): array;
+
+    public function updateWebhookReceivedAndDelivery(string $uid, string $token, int $userId, int $deviceId): array;
 }

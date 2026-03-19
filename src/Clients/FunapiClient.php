@@ -253,6 +253,24 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return ['paidTill' => date('Y-m-d H:i:s', ($res->json('due') ?? 0) / 1000)];
     }
 
+    public function updateWebhookReceived(string $uid, string $token, int $userId, int $deviceId, bool $privateMessages = false): array
+    {
+        $url = $this->buildUrl($uid, $token, 'update-webhook-received');
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
+            ->put($url, ['userId' => $userId, 'deviceId' => $deviceId, 'privateMessages' => $privateMessages]);
+        if ($res->failed() || $res->json('error')) return ['error' => $res->json('error', 'error')];
+        return $res->json() ?? [];
+    }
+
+    public function updateWebhookReceivedAndDelivery(string $uid, string $token, int $userId, int $deviceId): array
+    {
+        $url = $this->buildUrl($uid, $token, 'update-webhook-received-and-delivery');
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
+            ->put($url, ['userId' => $userId, 'deviceId' => $deviceId]);
+        if ($res->failed() || $res->json('error')) return ['error' => $res->json('error', 'error')];
+        return $res->json() ?? [];
+    }
+
     public function getParticipants(string $uid, string $token, string $phone): array
     {
         $startTime = microtime(true);
