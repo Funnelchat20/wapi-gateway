@@ -282,6 +282,16 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return [];
     }
 
+    public function updateWebhookReceived(string $uid, string $token, int $userId, int $deviceId, bool $privateMessages = false): array
+    {
+        return [];
+    }
+
+    public function updateWebhookReceivedAndDelivery(string $uid, string $token, int $userId, int $deviceId): array
+    {
+        return [];
+    }
+
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
         $startTime = microtime(true);
