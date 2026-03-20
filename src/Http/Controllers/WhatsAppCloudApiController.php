@@ -389,13 +389,13 @@ class WhatsAppCloudApiController
             'file' => ['string', 'required'],
             'user_id' => ['int', 'required'],
         ]);
-        $fileUrl = env('AWS_BUCKET_URL') . '/' . $validated['user_id'] . '/' . $validated['file'];
+        $fileUrl = config('wapi-gateway.aws_bucket_url') . '/' . $validated['user_id'] . '/' . $validated['file'];
         $fileContent = @file_get_contents($fileUrl);
         if ($fileContent) {
             $fileSize = strlen($fileContent);
             $finfo = new finfo(FILEINFO_MIME_TYPE);
             $fileMimeType = $finfo->buffer($fileContent);
-            $session = self::sendHttpRequestTemplates(env('META_APP_ID') . '/uploads?file_length=' . $fileSize . '&file_type=' . $fileMimeType, 'post', []);
+            $session = self::sendHttpRequestTemplates(config('wapi-gateway.meta_app_id') . '/uploads?file_length=' . $fileSize . '&file_type=' . $fileMimeType, 'post', []);
             if ($session->failed() || $session->json('error')) {
                 $errorMessage = $session->json('error');
                 return response()->json(['error' => $errorMessage], $session->status());

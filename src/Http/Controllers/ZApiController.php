@@ -62,7 +62,7 @@ class ZApiController
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$this->uid, $this->token, $action], self::URL);
         $startTime = microtime(true);
         try {
-            $response = Http::withHeaders(['Client-Token' => env('ZAPI_CLIENT_TOKEN')])
+            $response = Http::withHeaders(['Client-Token' => config('zapi.client_token')])
                 ->timeout(120)
                 ->{$method}($url, $params);
             $this->logRequest($action, $this->uid, [], $startTime, $response, $url, $params);
@@ -711,7 +711,7 @@ class ZApiController
         $body = http_build_query(['messageId' => $validated['messageId'], 'phone' => $validated['phone']]) . '&owner=true';
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$this->uid, $this->token, 'messages'], self::URL);
         $url = "$url?$body";
-        $response = Http::withHeaders(['Client-Token' => env('ZAPI_CLIENT_TOKEN', '')])->timeout(20)->delete($url);
+        $response = Http::withHeaders(['Client-Token' => config('zapi.client_token', '')])->timeout(20)->delete($url);
         if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
         return response()->noContent();
     }
@@ -873,7 +873,7 @@ class ZApiController
         try {
             $response = Http::withHeaders([
                 'accept' => 'application/json',
-                'client-token' => env('ZAPI_CLIENT_TOKEN'),
+                'client-token' => config('zapi.client_token'),
             ])->delete($url);
         } catch (ConnectionException $e) {
             captureException($e);
@@ -889,7 +889,7 @@ class ZApiController
         try {
             $response = Http::withHeaders([
                 'accept' => 'application/json',
-                'client-token' => env('ZAPI_CLIENT_TOKEN'),
+                'client-token' => config('zapi.client_token'),
             ])->delete($url);
         } catch (ConnectionException $e) {
             captureException($e);

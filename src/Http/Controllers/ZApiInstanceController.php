@@ -118,7 +118,7 @@ class ZApiInstanceController extends Controller implements WhatsAppProviderInsta
     {
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, self::LIGHT_GROUP_METADATA], config('zapi.zapi_url')) . '/' . $phone;
         try {
-            $response = Http::withHeaders(['Client-Token' => env('ZAPI_CLIENT_TOKEN')])->get($url);
+            $response = Http::withHeaders(['Client-Token' => config('zapi.client_token')])->get($url);
             if ($response->failed() || $response->json('error') || $response->json('success') === false) {
                 logger()->error('deviceUid #' . $uid . ' ZApiInstanceController getParticipants error response', [
                     'message' => self::FAILED_TO_FETCH_PARTICIPANTS_MESSAGE,

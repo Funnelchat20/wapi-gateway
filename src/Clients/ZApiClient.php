@@ -851,7 +851,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     {
         $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'queue/' . $messageQueueUid], $this->baseUrl());
-        $res = Http::withHeaders(['accept' => 'application/json', 'client-token' => env('ZAPI_CLIENT_TOKEN', '')])->delete($url);
+        $res = Http::withHeaders(['accept' => 'application/json', 'client-token' => config('zapi.client_token', '')])->delete($url);
         $this->logRequest('deleteQueueMessage', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
@@ -861,7 +861,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     {
         $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'queue'], $this->baseUrl());
-        $res = Http::withHeaders(['accept' => 'application/json', 'client-token' => env('ZAPI_CLIENT_TOKEN', '')])->delete($url);
+        $res = Http::withHeaders(['accept' => 'application/json', 'client-token' => config('zapi.client_token', '')])->delete($url);
         $this->logRequest('clearQueue', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];

@@ -88,7 +88,7 @@ class WhatsAppCloudHelper
 
     public static function uploadFileHeaderHandle($file, $token, $apiUrl)
     {
-        $fileUrl = env('AWS_BUCKET_URL') . '/' . $file;
+        $fileUrl = config('wapi-gateway.aws_bucket_url') . '/' . $file;
         $fileContent = @file_get_contents($fileUrl);
         if ($fileContent === false) {
             return ['error' => 'File not found'];
@@ -97,7 +97,7 @@ class WhatsAppCloudHelper
         $fileSize = strlen($fileContent);
         $finfo = new finfo(FILEINFO_MIME_TYPE);
         $fileMimeType = $finfo->buffer($fileContent);
-        $url = $apiUrl . '/' . env('META_APP_ID') . '/uploads?file_length=' . $fileSize . '&file_type=' . $fileMimeType;
+        $url = $apiUrl . '/' . config('wapi-gateway.meta_app_id') . '/uploads?file_length=' . $fileSize . '&file_type=' . $fileMimeType;
         $session = Http::withToken($token)->post($url, []);
         if ($session->failed() || $session->json('error')) {
             \Sentry\captureMessage('WhatsAppCloudHelper uploadFileHeaderHandle session : ' . json_encode($session->json()));

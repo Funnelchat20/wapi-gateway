@@ -400,8 +400,8 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     public function uploadHeaderHandle(string $token, string $fileKey): array
     {
         $startTime = microtime(true);
-        $appId = env('META_APP_ID');
-        $fileUrl = env('AWS_BUCKET_URL') . '/' . $fileKey;
+        $appId = config('wapi-gateway.meta_app_id');
+        $fileUrl = config('wapi-gateway.aws_bucket_url') . '/' . $fileKey;
         $fileContent = @file_get_contents($fileUrl);
         if ($fileContent === false) return ['error' => 'File not found'];
         $fileSize = strlen($fileContent);
