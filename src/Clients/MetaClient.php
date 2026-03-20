@@ -8,6 +8,7 @@ use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\TemplatesContract;
 use Funnelchat\WapiGateway\Helpers\WhatsAppCloudHelper;
 use Funnelchat\WapiGateway\Jobs\StoreDeviceLogJob;
+use Funnelchat\WapiGateway\Resources\Meta\MessageResource;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Illuminate\Support\Facades\Http;
 
@@ -37,7 +38,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             return ['error' => $res->json('error', 'Failed to send')];
         }
         $this->logRequest('sendText', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
-        return $res->json();
+        return MessageResource::make($res->json());
     }
 
     public function create(int $userId, int $deviceId): array
@@ -72,7 +73,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             return ['error' => $res->json('error', 'Failed to send')];
         }
         $this->logRequest('sendFile', $uid, ['phone' => $to, 'file_type' => $ext], $startTime, $res, $url, $payload);
-        return $res->json();
+        return MessageResource::make($res->json());
     }
 
     public function sendLocation(string $uid, string $token, string $to, float $lat, float $lng, array $options = []): array
@@ -88,7 +89,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             return ['error' => $res->json('error', 'Failed to send')];
         }
         $this->logRequest('sendLocation', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
-        return $res->json();
+        return MessageResource::make($res->json());
     }
 
     public function sendButtons(string $uid, string $token, string $to, string $message, array $buttons, array $options = []): array
@@ -125,7 +126,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             return ['error' => $res->json('error', 'Failed to send')];
         }
         $this->logRequest('sendButtons', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
-        return $res->json();
+        return MessageResource::make($res->json());
     }
 
     public function sendButtonLink(string $uid, string $token, string $to, string $message, string $url, string $label, array $options = []): array
@@ -148,7 +149,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             return ['error' => $res->json('error', 'Failed to send')];
         }
         $this->logRequest('sendButtonLink', $uid, ['phone' => $to], $startTime, $res, $requestUrl, $payload);
-        return $res->json();
+        return MessageResource::make($res->json());
     }
 
     public function sendOptionList(string $uid, string $token, string $to, string $message, string $buttonLabel, array $optionsList, array $extra = []): array
@@ -199,7 +200,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             return ['error' => $res->json('error', 'Failed to send')];
         }
         $this->logRequest('sendOptionList', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
-        return $res->json();
+        return MessageResource::make($res->json());
     }
 
     public function sendPoll(string $uid, string $token, string $to, string $message, array $pollOptions, array $options = []): array
@@ -218,7 +219,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             return ['error' => $res->json('error', 'Failed to send')];
         }
         $this->logRequest('sendLink', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
-        return $res->json();
+        return MessageResource::make($res->json());
     }
 
     public function sendEvent(string $uid, string $token, string $toGroupPhone, array $event, array $options = []): array
@@ -246,7 +247,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             return ['error' => $res->json('error', 'Failed to send')];
         }
         $this->logRequest('sendTemplate', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
-        return $res->json();
+        return MessageResource::make($res->json());
     }
 
     private function mapType(string $ext): string
@@ -298,7 +299,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             return ['error' => $res->json('error', 'Failed to send')];
         }
         $this->logRequest('sendContact', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
-        return $res->json();
+        return MessageResource::make($res->json());
     }
 
     public function listTemplates(string $wabaId, string $token, array $params = []): array
