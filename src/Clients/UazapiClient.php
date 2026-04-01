@@ -854,6 +854,11 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return $results;
     }
 
+    public function sendPtv(string $uid, string $token, string $to, string $videoUrl, array $options = []): array
+    {
+        return ['error' => 'PTV is not supported by UAZAPI provider'];
+    }
+
     public function pinMessage(string $uid, string $token, string $phone, string $messageId, string $duration): array
     {
         return ['error' => 'pinMessage is not supported by UAZAPI provider'];
