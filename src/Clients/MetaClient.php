@@ -262,7 +262,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function sendPtv(string $uid, string $token, string $to, string $videoUrl, array $options = []): array
     {
-        return ['error' => 'PTV is not supported by Meta provider'];
+        return ['error' => 'Not supported'];
     }
 
     public function pinMessage(string $uid, string $token, string $phone, string $messageId, string $duration): array

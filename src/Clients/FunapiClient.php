@@ -645,8 +645,12 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
         $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'send-ptv');
         $params = ['phone' => $to, 'ptv' => $videoUrl];
-        if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
-        if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
+        if (isset($options['delayMessage'])) {
+            $params['delayMessage'] = (int) $options['delayMessage'];
+        }
+        if (isset($options['delayTyping'])) {
+            $params['delayTyping'] = (int) $options['delayTyping'];
+        }
 
         $request = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
             ->timeout(config('funapi.timeout', 120));
@@ -655,7 +659,7 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
             $request = $request->retry(
                 config('funapi.max_attempts', 2),
                 config('funapi.retry_delay', 500),
-                function ($exception, $request) {
+                function (\Throwable $exception) {
                     if ($exception instanceof \Illuminate\Http\Client\RequestException &&
                         str_contains($exception->getMessage(), 'cURL error 28')) {
                         return false;
