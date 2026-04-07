@@ -64,7 +64,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
                 config("$this->configPrefix.retry_delay", 500),
                 function ($exception, $request) {
                     // Don't retry on timeout (prevents duplicates)
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
+                    if ($exception instanceof RequestException &&
                         str_contains($exception->getMessage(), 'cURL error 28')) {
                         return false;
                     }
@@ -308,7 +308,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
                 config("$this->configPrefix.retry_delay", 500),
                 function ($exception, $request) {
                     // Don't retry on timeout (prevents duplicates)
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
+                    if ($exception instanceof RequestException &&
                         str_contains($exception->getMessage(), 'cURL error 28')) {
                         return false;
                     }
@@ -374,7 +374,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
                 config("$this->configPrefix.max_attempts", 2),
                 config("$this->configPrefix.retry_delay", 500),
                 function ($exception, $request) {
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
+                    if ($exception instanceof RequestException &&
                         str_contains($exception->getMessage(), 'cURL error 28')) {
                         return false;
                     }
@@ -437,7 +437,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
                 config("$this->configPrefix.max_attempts", 2),
                 config("$this->configPrefix.retry_delay", 500),
                 function ($exception, $request) {
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
+                    if ($exception instanceof RequestException &&
                         str_contains($exception->getMessage(), 'cURL error 28')) {
                         return false;
                     }
@@ -978,9 +978,11 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-ptv'], $this->baseUrl());
         $params = ['phone' => $to, 'ptv' => $videoUrl];
+
         if (isset($options['delayMessage'])) {
             $params['delayMessage'] = (int) $options['delayMessage'];
         }
+
         if (isset($options['delayTyping'])) {
             $params['delayTyping'] = (int) $options['delayTyping'];
         }
@@ -992,11 +994,13 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
             $request = $request->retry(
                 config("$this->configPrefix.max_attempts", 2),
                 config("$this->configPrefix.retry_delay", 500),
+
                 function (\Throwable $exception) {
                     if ($exception instanceof RequestException &&
                         str_contains($exception->getMessage(), 'cURL error 28')) {
                         return false;
                     }
+                    
                     return $exception instanceof ConnectionException;
                 },
                 false
