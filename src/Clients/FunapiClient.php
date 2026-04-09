@@ -21,21 +21,24 @@ use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Client\ConnectionException;
 
-class FunapiClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract
+class FunapiClient extends ZApiClient
 {
     use LogsDeviceRequests;
+
+    protected string $configPrefix = 'funapi';
 
     protected function getProviderName(): string
     {
         return 'funapi';
     }
+
     // Status constants for compatibility with WAPI
-    private const YOU_ARE_NOT_CONNECTED = 'You are not connected.';
-    private const YOU_NEED_TO_RESTORE_SESSION = 'You need to restore the session.';
-    private const YOU_ARE_ALREADY_CONNECTED = 'You are already connected.';
-    private const PENDING_SUBSCRIPTION = 'To continue sending a message, you must subscribe to this instance again';
-    private const INSTANCE_STATUSES = [self::YOU_ARE_ALREADY_CONNECTED, self::YOU_ARE_NOT_CONNECTED, self::YOU_NEED_TO_RESTORE_SESSION];
-    private const QR_CODE_RETRIEVAL_ERROR_MESSAGE = 'Error retrieving QR code.';
+    protected const YOU_ARE_NOT_CONNECTED = 'You are not connected.';
+    protected const YOU_NEED_TO_RESTORE_SESSION = 'You need to restore the session.';
+    protected const YOU_ARE_ALREADY_CONNECTED = 'You are already connected.';
+    protected const PENDING_SUBSCRIPTION = 'To continue sending a message, you must subscribe to this instance again';
+    protected const INSTANCE_STATUSES = [self::YOU_ARE_ALREADY_CONNECTED, self::YOU_ARE_NOT_CONNECTED, self::YOU_NEED_TO_RESTORE_SESSION];
+    protected const QR_CODE_RETRIEVAL_ERROR_MESSAGE = 'Error retrieving QR code.';
 
     private function buildUrl(string $uid, string $token, string $action): string
     {
@@ -978,7 +981,7 @@ class FunapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return ['success' => true];
     }
 
-    private function formatError(string $error): string
+    protected function formatError(string $error): string
     {
         return match ($error) {
             'Instance not found' => 'instance_not_found',

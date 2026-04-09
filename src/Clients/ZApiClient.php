@@ -20,6 +20,7 @@ use Funnelchat\WapiGateway\Resources\Zapi\CreateGroupResource;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 
 class ZApiClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract
 {
@@ -63,7 +64,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
                 config("$this->configPrefix.retry_delay", 500),
                 function ($exception, $request) {
                     // Don't retry on timeout (prevents duplicates)
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
+                    if ($exception instanceof RequestException &&
                         str_contains($exception->getMessage(), 'cURL error 28')) {
                         return false;
                     }
@@ -307,7 +308,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
                 config("$this->configPrefix.retry_delay", 500),
                 function ($exception, $request) {
                     // Don't retry on timeout (prevents duplicates)
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
+                    if ($exception instanceof RequestException &&
                         str_contains($exception->getMessage(), 'cURL error 28')) {
                         return false;
                     }
@@ -373,7 +374,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
                 config("$this->configPrefix.max_attempts", 2),
                 config("$this->configPrefix.retry_delay", 500),
                 function ($exception, $request) {
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
+                    if ($exception instanceof RequestException &&
                         str_contains($exception->getMessage(), 'cURL error 28')) {
                         return false;
                     }
@@ -436,7 +437,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
                 config("$this->configPrefix.max_attempts", 2),
                 config("$this->configPrefix.retry_delay", 500),
                 function ($exception, $request) {
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
+                    if ($exception instanceof RequestException &&
                         str_contains($exception->getMessage(), 'cURL error 28')) {
                         return false;
                     }
@@ -970,6 +971,55 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $this->logRequest('groupMetadata', $uid, $res->failed() || $res->json('error') || $res->json('success') === false ? ['error' => $res->json('error', $res->json('message', 'error'))] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error') || $res->json('success') === false) return ['error' => $this->formatError($res->json('error', $res->json('message', 'error')))];
         return $res->json();
+    }
+
+    public function sendPtv(string $uid, string $token, string $to, string $videoUrl, array $options = []): array
+    {
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-ptv'], $this->baseUrl());
+        $params = ['phone' => $to, 'ptv' => $videoUrl];
+
+        if (isset($options['delayMessage'])) {
+            $params['delayMessage'] = (int) $options['delayMessage'];
+        }
+
+        if (isset($options['delayTyping'])) {
+            $params['delayTyping'] = (int) $options['delayTyping'];
+        }
+
+        $request = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
+            ->timeout(config("$this->configPrefix.timeout", 120));
+
+        if ($options['retry'] ?? false) {
+            $request = $request->retry(
+                config("$this->configPrefix.max_attempts", 2),
+                config("$this->configPrefix.retry_delay", 500),
+
+                function (\Throwable $exception) {
+                    if ($exception instanceof RequestException &&
+                        str_contains($exception->getMessage(), 'cURL error 28')) {
+                        return false;
+                    }
+                    
+                    return $exception instanceof ConnectionException;
+                },
+                false
+            );
+        }
+
+        $res = $request->post($url, $params);
+
+        $context = ['phone' => $to, 'has_retry' => $options['retry'] ?? false];
+
+        if ($res->failed() || $res->json('error')) {
+            $error = $this->formatError($res->json('error', 'error'));
+            $context['error'] = $error;
+            $this->logRequest('sendPtv', $uid, $context, $startTime, $res, $url, $params);
+            return ['error' => $error];
+        }
+
+        $this->logRequest('sendPtv', $uid, $context, $startTime, $res, $url, $params);
+        return MessageResource::make($res->json());
     }
 
     public function pinMessage(string $uid, string $token, string $phone, string $messageId, string $duration): array

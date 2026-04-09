@@ -14,5 +14,6 @@ interface MessagesContract
     public function sendLink(string $uid, string $token, string $to, string $message, string $linkUrl, array $options = []): array;
     public function sendEvent(string $uid, string $token, string $toGroupPhone, array $event, array $options = []): array;
     public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array;
+    public function sendPtv(string $uid, string $token, string $to, string $videoUrl, array $options = []): array;
     public function pinMessage(string $uid, string $token, string $phone, string $messageId, string $duration): array;
 }
