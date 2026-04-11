@@ -100,14 +100,19 @@ class FunapiClient extends ZApiClient
             'sessionName' => 'Funnelchat',
         ];
 
-        // Only configure webhooks if WEBHOOK_BASE_URL is set
+        // Only configure webhooks if WEBHOOK_BASE_URL is set.
+        // FunAPI shares the Z-API-compatible webhook receiver convention with
+        // Z-API and Z-API Lite — all three "primo" providers POST to
+        // /webhooks/zapi/* and the host app handles them with a single
+        // controller. Do NOT use /webhooks/funapi/* here — those routes do not
+        // exist in the standard wapi host.
         if ($webhookBaseUrl) {
-            $payload['receivedCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/received?userId=' . $userId . '&deviceId=' . $deviceId;
-            $payload['receivedAndDeliveryCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/received-and-delivery?userId=' . $userId . '&deviceId=' . $deviceId;
-            $payload['disconnectedCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/disconnected?userId=' . $userId . '&deviceId=' . $deviceId;
-            $payload['connectedCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/connected?userId=' . $userId . '&deviceId=' . $deviceId;
-            $payload['messageStatusCallbackUrl'] = $webhookStatusBaseUrl . '/webhooks/funapi/message-status?userId=' . $userId . '&deviceId=' . $deviceId;
-            $payload['blockCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/block?userId=' . $userId . '&deviceId=' . $deviceId;
+            $payload['receivedCallbackUrl'] = $webhookBaseUrl . '/webhooks/zapi/received?userId=' . $userId . '&deviceId=' . $deviceId;
+            $payload['receivedAndDeliveryCallbackUrl'] = $webhookBaseUrl . '/webhooks/zapi/received-and-delivery?userId=' . $userId . '&deviceId=' . $deviceId;
+            $payload['disconnectedCallbackUrl'] = $webhookBaseUrl . '/webhooks/zapi/disconnected?userId=' . $userId . '&deviceId=' . $deviceId;
+            $payload['connectedCallbackUrl'] = $webhookBaseUrl . '/webhooks/zapi/connected?userId=' . $userId . '&deviceId=' . $deviceId;
+            $payload['messageStatusCallbackUrl'] = $webhookStatusBaseUrl . '/webhooks/zapi/message-status?userId=' . $userId . '&deviceId=' . $deviceId;
+            $payload['blockCallbackUrl'] = $webhookBaseUrl . '/webhooks/zapi/block?userId=' . $userId . '&deviceId=' . $deviceId;
         }
 
         $url = config('funapi.on_demand_url');
