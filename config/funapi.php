@@ -10,6 +10,8 @@ return [
 
     // Webhook configuration
     'webhook_base_url' => env('WEBHOOK_BASE_URL', env('APP_URL')),
+    // Optional: separate base URL for messageStatusCallbackUrl. Falls back to webhook_base_url when unset.
+    'webhook_status_base_url' => env('WEBHOOK_STATUS_BASE_URL', env('WEBHOOK_BASE_URL', env('APP_URL'))),
 
     /*
     |--------------------------------------------------------------------------

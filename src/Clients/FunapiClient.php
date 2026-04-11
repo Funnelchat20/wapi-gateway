@@ -93,6 +93,7 @@ class FunapiClient extends ZApiClient
         $startTime = microtime(true);
         $name = 'U-' . $userId . ' D-' . $deviceId;
         $webhookBaseUrl = config('funapi.webhook_base_url');
+        $webhookStatusBaseUrl = config('funapi.webhook_status_base_url') ?: $webhookBaseUrl;
 
         $payload = [
             'name' => $name,
@@ -105,7 +106,7 @@ class FunapiClient extends ZApiClient
             $payload['receivedAndDeliveryCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/received-and-delivery?userId=' . $userId . '&deviceId=' . $deviceId;
             $payload['disconnectedCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/disconnected?userId=' . $userId . '&deviceId=' . $deviceId;
             $payload['connectedCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/connected?userId=' . $userId . '&deviceId=' . $deviceId;
-            $payload['messageStatusCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/message-status?userId=' . $userId . '&deviceId=' . $deviceId;
+            $payload['messageStatusCallbackUrl'] = $webhookStatusBaseUrl . '/webhooks/funapi/message-status?userId=' . $userId . '&deviceId=' . $deviceId;
             $payload['blockCallbackUrl'] = $webhookBaseUrl . '/webhooks/funapi/block?userId=' . $userId . '&deviceId=' . $deviceId;
         }
 
