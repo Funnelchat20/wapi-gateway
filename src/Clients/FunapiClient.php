@@ -167,23 +167,44 @@ class FunapiClient extends ZApiClient
             ];
         }
 
-        // Not authenticated → try to fetch the QR. FunAPI's qr-code/image also
-        // hiccups with 500 "internal error" during the same bootstrap window,
-        // so treat any failure as "keep polling" rather than a hard error:
-        // return an empty qrCode so the frontend stays in the waiting state
-        // and will try again on the next poll.
-        $qrUrl = $this->buildUrl($uid, $token, 'qr-code/image');
-        $qrRes = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($qrUrl);
-
-        $qrImage = '';
-        if (!$qrRes->failed() && !$qrRes->json('error')) {
-            $qrImage = $qrRes->json('image') ?? $qrRes->json('value') ?? '';
-        }
+        // Not authenticated → try to fetch the QR. FunAPI's qr-code/image
+        // hiccups with 500 "internal error" in roughly half of all calls, but
+        // empirically at least 1 out of every 3-4 rapid retries succeeds. Retry
+        // a few times with a short backoff so the frontend gets a stable QR
+        // instead of flickering between empty and full responses. Fall back to
+        // empty qrCode (still 'got qr code' state) if all retries fail — the
+        // frontend will try again on its next poll.
+        $qrImage = $this->fetchFunApiQrWithRetries($uid, $token);
 
         return [
             'accountStatus' => 'got qr code',
             'qrCode' => $qrImage,
         ];
+    }
+
+    private function fetchFunApiQrWithRetries(string $uid, string $token): string
+    {
+        $qrUrl = $this->buildUrl($uid, $token, 'qr-code/image');
+        $headers = ['Client-Token' => config('funapi.client_token')];
+        $maxAttempts = 3;
+        $backoffMicroseconds = 200_000;
+
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            $qrRes = Http::withHeaders($headers)->get($qrUrl);
+
+            if (!$qrRes->failed() && !$qrRes->json('error')) {
+                $qrImage = $qrRes->json('image') ?? $qrRes->json('value') ?? '';
+                if ($qrImage !== '') {
+                    return $qrImage;
+                }
+            }
+
+            if ($attempt < $maxAttempts) {
+                usleep($backoffMicroseconds);
+            }
+        }
+
+        return '';
     }
 
     public function qrCode(string $uid, string $token): array
