@@ -117,7 +117,16 @@ class FunapiClient extends ZApiClient
             return ['error' => $res->json('error', 'Failed to create instance')];
         }
 
-        return ['uid' => $res->json('id'), 'token' => $res->json('token')];
+        $uid = $res->json('id');
+        $token = $res->json('token');
+
+        $subscribeResult = $this->subscribe($uid, $token);
+        if (isset($subscribeResult['error'])) {
+            $this->logRequest('create.subscribe', "U-{$userId}-D-{$deviceId}", ['error' => $subscribeResult['error']], $startTime, $res, $url, $payload);
+            return ['error' => 'Instance created but subscription activation failed: ' . $subscribeResult['error']];
+        }
+
+        return ['uid' => $uid, 'token' => $token];
     }
 
     public function status(string $uid, string $token): array
@@ -237,8 +246,7 @@ class FunapiClient extends ZApiClient
 
     public function subscribe(string $uid, string $token): array
     {
-        $instanceUid = explode('-', $uid)[0] ?? $uid;
-        $url = str_replace(['UID', 'TOKEN'], [$instanceUid, $token], config('funapi.subscription_url'));
+        $url = str_replace(['UID', 'TOKEN'], [$uid, $token], config('funapi.subscription_url'));
         $res = Http::withToken(config('funapi.token'))->post($url);
         if ($res->failed() || $res->json('error')) return ['error' => $res->json('error') ?? 'subscribe_failed'];
         return ['paidTill' => date('Y-m-d H:i:s', ($res->json('due') ?? 0) / 1000)];
@@ -246,11 +254,10 @@ class FunapiClient extends ZApiClient
 
     public function unsubscribe(string $uid, string $token): array
     {
-        $instanceUid = explode('-', $uid)[0] ?? $uid;
-        $disconnectUrl = $this->buildUrl($instanceUid, $token, 'disconnect');
+        $disconnectUrl = $this->buildUrl($uid, $token, 'disconnect');
         $disc = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($disconnectUrl);
         if ($disc->failed() || $disc->json('error')) return ['error' => $disc->json('error') ?? 'disconnect_failed'];
-        $url = str_replace(['UID', 'TOKEN'], [$instanceUid, $token], config('funapi.unsubscription_url'));
+        $url = str_replace(['UID', 'TOKEN'], [$uid, $token], config('funapi.unsubscription_url'));
         $res = Http::withToken(config('funapi.token'))->post($url);
         if ($res->failed() || $res->json('error')) return ['error' => $res->json('error') ?? 'unsubscribe_failed'];
         return ['paidTill' => date('Y-m-d H:i:s', ($res->json('due') ?? 0) / 1000)];
@@ -665,7 +672,7 @@ class FunapiClient extends ZApiClient
         return $res->json();
     }
 
-    private function mapAction(string $ext): string
+    protected function mapAction(string $ext): string
     {
         return [
             'jpg' => 'send-image', 'jpeg' => 'send-image', 'png' => 'send-image',
@@ -676,7 +683,7 @@ class FunapiClient extends ZApiClient
         ][$ext] ?? 'invalid';
     }
 
-    private function mapAttr(string $ext): string
+    protected function mapAttr(string $ext): string
     {
         return [
             'jpg' => 'image', 'jpeg' => 'image', 'png' => 'image',
