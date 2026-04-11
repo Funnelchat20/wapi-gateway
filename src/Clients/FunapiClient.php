@@ -154,36 +154,35 @@ class FunapiClient extends ZApiClient
 
         $data = $res->json();
 
-        // ALWAYS add accountStatus field (WAPI compatibility)
-        $accountStatus = 'authenticated';
-        $qrCode = '';
-
-        // Special handling for "You are not connected" or "You need to restore the session"
-        if (isset($data['error']) && in_array($data['error'], [self::YOU_ARE_NOT_CONNECTED, self::YOU_NEED_TO_RESTORE_SESSION])) {
-            $accountStatus = 'got qr code';
-
-            // MAKE SECOND API CALL to get QR code automatically
-            $qrUrl = $this->buildUrl($uid, $token, 'qr-code/image');
-            $qrRes = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($qrUrl);
-
-            if ($qrRes->failed() || $qrRes->json('error')) {
-                return ['error' => self::QR_CODE_RETRIEVAL_ERROR_MESSAGE];
-            }
-
-            // Funapi returns "image" instead of "value"
-            $qrImage = $qrRes->json('image') ?? $qrRes->json('value');
-            
-            if (!$qrImage) {
-                return ['error' => self::QR_CODE_RETRIEVAL_ERROR_MESSAGE];
-            }
-
-            $qrCode = $qrImage;
+        // `smartphoneConnected` is the only reliable authentication signal.
+        // FunAPI's `connected` and `error` fields oscillate for several seconds
+        // after instance creation (e.g. returning `connected:true, error:""`
+        // transiently while the session is still booting), so they cannot be
+        // trusted. Only `smartphoneConnected: true` means the user scanned the
+        // QR and the WhatsApp session is live.
+        if (($data['smartphoneConnected'] ?? false) === true) {
+            return [
+                'accountStatus' => 'authenticated',
+                'qrCode' => '',
+            ];
         }
 
-        // Return ONLY the fields that WAPI original returns (StatusResource)
+        // Not authenticated → try to fetch the QR. FunAPI's qr-code/image also
+        // hiccups with 500 "internal error" during the same bootstrap window,
+        // so treat any failure as "keep polling" rather than a hard error:
+        // return an empty qrCode so the frontend stays in the waiting state
+        // and will try again on the next poll.
+        $qrUrl = $this->buildUrl($uid, $token, 'qr-code/image');
+        $qrRes = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($qrUrl);
+
+        $qrImage = '';
+        if (!$qrRes->failed() && !$qrRes->json('error')) {
+            $qrImage = $qrRes->json('image') ?? $qrRes->json('value') ?? '';
+        }
+
         return [
-            'accountStatus' => $accountStatus,
-            'qrCode' => $qrCode,
+            'accountStatus' => 'got qr code',
+            'qrCode' => $qrImage,
         ];
     }
 
