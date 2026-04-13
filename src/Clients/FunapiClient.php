@@ -40,6 +40,13 @@ class FunapiClient extends ZApiClient
     protected const INSTANCE_STATUSES = [self::YOU_ARE_ALREADY_CONNECTED, self::YOU_ARE_NOT_CONNECTED, self::YOU_NEED_TO_RESTORE_SESSION];
     protected const QR_CODE_RETRIEVAL_ERROR_MESSAGE = 'Error retrieving QR code.';
 
+    // FunAPI's `/device.name` field oscillates between the real WhatsApp pushname
+    // and the internal "U-{userId} D-{deviceId}" placeholder set at instance
+    // creation time. `me()` retries until a stable name is returned.
+    private const ME_MAX_ATTEMPTS = 5;
+    private const ME_BACKOFF_MICROSECONDS = 200_000;
+    private const INTERNAL_NAME_PATTERN = '/^U-\d+ D-\d+$/';
+
     private function buildUrl(string $uid, string $token, string $action): string
     {
         $baseUrl = rtrim(config('funapi.base_url'), '/');
@@ -246,10 +253,49 @@ class FunapiClient extends ZApiClient
     {
         $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'device');
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
-        $this->logRequest('me', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return MeResource::make($res->json());
+        $headers = ['Client-Token' => config('funapi.client_token')];
+
+        $lastRes = null;
+        $lastData = null;
+
+        for ($attempt = 1; $attempt <= self::ME_MAX_ATTEMPTS; $attempt++) {
+            $res = Http::withHeaders($headers)->get($url);
+            $lastRes = $res;
+
+            if ($res->failed() || $res->json('error')) {
+                if ($attempt < self::ME_MAX_ATTEMPTS) {
+                    usleep(self::ME_BACKOFF_MICROSECONDS);
+                }
+                continue;
+            }
+
+            $data = $res->json();
+            $lastData = $data;
+            $name = $data['name'] ?? null;
+
+            // Found a stable name (real pushname) → return immediately.
+            if ($name !== null && $name !== '' && !preg_match(self::INTERNAL_NAME_PATTERN, $name)) {
+                $this->logRequest('me', $uid, ['attempts' => $attempt], $startTime, $res, $url);
+                return MeResource::make($data);
+            }
+
+            if ($attempt < self::ME_MAX_ATTEMPTS) {
+                usleep(self::ME_BACKOFF_MICROSECONDS);
+            }
+        }
+
+        $this->logRequest('me', $uid, $lastRes && $lastRes->failed() ? ['error' => $lastRes->json('error', 'error')] : ['exhausted' => true], $startTime, $lastRes, $url);
+
+        // All attempts failed → propagate error.
+        if ($lastData === null) {
+            return ['error' => $this->formatError($lastRes?->json('error', 'error') ?? 'error')];
+        }
+
+        // All attempts returned the internal placeholder → return MeResource shape
+        // with name explicitly null so callers do not persist the placeholder as alias.
+        $result = MeResource::make($lastData);
+        $result['name'] = null;
+        return $result;
     }
 
     public function checkPhone(string $uid, string $token, string $phone): array
