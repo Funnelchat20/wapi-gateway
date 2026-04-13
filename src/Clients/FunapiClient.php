@@ -453,10 +453,19 @@ class FunapiClient extends ZApiClient
     {
         $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'send-button-list');
+        // FunApi's send-button-list handler expects `buttons` at the top level
+        // with `{id, title}` items — NOT the Z-API-compatible `buttonList.buttons[].label` shape.
+        // The monolith passes buttons as `[{id, label}]`, so translate `label` → `title` here.
         $payload = [
             'phone' => $to,
             'message' => $message,
-            'buttonList' => ['buttons' => $buttons],
+            'buttons' => array_map(
+                fn ($btn) => [
+                    'id' => (string) ($btn['id'] ?? ''),
+                    'title' => (string) ($btn['title'] ?? $btn['label'] ?? ''),
+                ],
+                $buttons
+            ),
         ];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
@@ -507,12 +516,25 @@ class FunapiClient extends ZApiClient
     {
         $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'send-option-list');
+        // FunApi's send-option-list handler expects `sections[].rows[]` top-level with `buttonLabel`
+        // alongside — NOT the Z-API-compatible `optionList.options[]` flat shape.
+        // Wrap the monolith's flat options list into a single section.
         $payload = [
             'phone' => $to,
             'message' => $message,
-            'optionList' => [
-                'options' => $optionsList,
-                'buttonLabel' => $buttonLabel,
+            'buttonLabel' => $buttonLabel,
+            'sections' => [
+                [
+                    'title' => '',
+                    'rows' => array_map(
+                        fn ($opt) => [
+                            'id' => (string) ($opt['id'] ?? ''),
+                            'title' => (string) ($opt['title'] ?? $opt['label'] ?? ''),
+                            'description' => (string) ($opt['description'] ?? ''),
+                        ],
+                        $optionsList
+                    ),
+                ],
             ],
         ];
         if (isset($extra['delayMessage'])) $payload['delayMessage'] = (int) $extra['delayMessage'];
