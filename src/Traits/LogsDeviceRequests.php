@@ -62,7 +62,7 @@ trait LogsDeviceRequests
         if (isset($context['error']) && !is_string($context['error'])) {
             $context['error'] = is_array($context['error'])
                 ? ($context['error']['message'] ?? $context['error']['reason'] ?? json_encode($context['error']))
-                : json_encode($context['error']) ?: (string) $context['error'];
+                : (json_encode($context['error']) ?: (string) $context['error']);
         }
 
         $logData = array_merge($logData, $context);
