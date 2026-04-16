@@ -439,9 +439,16 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         ][$ext] ?? 'invalid';
     }
 
-    private function formatError(?string $error): string
+    private function formatError(mixed $error): string
     {
         if ($error === null) return 'Unknown error';
+
+        if (is_array($error)) {
+            $error = $error['message'] ?? $error['reason'] ?? $error['error'] ?? json_encode($error);
+        } elseif (!is_string($error)) {
+            $error = json_encode($error) ?: (string) $error;
+        }
+
         return ucfirst(str_replace(['_', '-'], ' ', strtolower($error)));
     }
 
