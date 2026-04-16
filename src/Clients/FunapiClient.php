@@ -1082,8 +1082,14 @@ class FunapiClient extends ZApiClient
         return ['success' => true];
     }
 
-    protected function formatError(string $error): string
+    protected function formatError(mixed $error): string
     {
+        if (is_array($error)) {
+            $error = $error['message'] ?? $error['reason'] ?? $error['error'] ?? json_encode($error);
+        } elseif (!is_string($error)) {
+            $error = json_encode($error) ?: (string) $error;
+        }
+
         return match ($error) {
             'Instance not found' => 'instance_not_found',
             'To continue sending a message, you must subscribe to this instance again' => 'pending_subscription',
