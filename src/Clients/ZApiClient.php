@@ -831,9 +831,10 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     {
         $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'queue'], $this->baseUrl());
-        $params = ['page' => $options['page'] ?? 1, 'pageSize' => $options['pageSize'] ?? 499];
-        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->get($url, $params);
-        $this->logRequest('showQueue', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
+        $payload = ['pageSize' => min((int) ($options['pageSize'] ?? 20), 30)];
+        if (!empty($options['pagingState'])) $payload['pagingState'] = $options['pagingState'];
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->post($url, $payload);
+        $this->logRequest('showQueue', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }
