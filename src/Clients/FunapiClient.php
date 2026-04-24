@@ -1079,11 +1079,31 @@ class FunapiClient extends ZApiClient
     {
         $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'queue');
-        $params = ['page' => $options['page'] ?? 1, 'pageSize' => $options['pageSize'] ?? 499];
+        $pageSize = (int) ($options['pageSize'] ?? 20);
+        $page = $this->decodeQueueCursor($options['cursor'] ?? null);
+        $params = ['page' => $page, 'pageSize' => $pageSize];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url, $params);
         $this->logRequest('showQueue', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return $res->json();
+        $messages = $res->json() ?? [];
+        $hasMore = count($messages) === $pageSize;
+        return [
+            'messages' => $messages,
+            'cursor' => $hasMore ? $this->encodeQueueCursor($page + 1) : null,
+            'hasMore' => $hasMore,
+        ];
+    }
+
+    private function decodeQueueCursor(?string $cursor): int
+    {
+        if (empty($cursor)) return 1;
+        $decoded = json_decode(base64_decode($cursor, true) ?: '', true);
+        return is_array($decoded) && isset($decoded['page']) ? max(1, (int) $decoded['page']) : 1;
+    }
+
+    private function encodeQueueCursor(int $page): string
+    {
+        return base64_encode(json_encode(['page' => $page]));
     }
 
     public function queueCount(string $uid, string $token): array
