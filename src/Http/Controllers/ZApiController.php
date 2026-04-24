@@ -15,7 +15,6 @@ use Funnelchat\WapiGateway\Http\Resources\Zapi\LogOutResource;
 use Funnelchat\WapiGateway\Http\Resources\Zapi\MeResource;
 use Funnelchat\WapiGateway\Http\Resources\Zapi\MessageResource;
 use Funnelchat\WapiGateway\Http\Resources\Zapi\QrCodeResource;
-use Funnelchat\WapiGateway\Http\Resources\Zapi\QueuedMessageResource;
 use Funnelchat\WapiGateway\Http\Resources\Zapi\RebootResource;
 use Funnelchat\WapiGateway\Http\Resources\Zapi\StatusResource;
 use Funnelchat\WapiGateway\Jobs\ContactApp\ContactSynchronizationJob;
@@ -843,18 +842,22 @@ class ZApiController
         return response()->noContent();
     }
 
-    public function showMessagesQueue(Request $request): JsonResponse|AnonymousResourceCollection
+    public function showMessagesQueue(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'page' => ['int', 'sometimes'],
-            'pageSize' => ['int', 'sometimes']
+            'pageSize' => ['int', 'sometimes', 'max:30'],
+            'cursor' => ['string', 'sometimes'],
         ]);
-        $response = self::sendHttpRequest(RequestAlias::METHOD_GET, [
-            'page' => $validated['page'] ?? 1,
-            'pageSize' => $validated['pageSize'] ?? 499
-        ], 'queue');
+        $payload = ['pageSize' => $validated['pageSize'] ?? 20];
+        if (!empty($validated['cursor'])) $payload['pagingState'] = $validated['cursor'];
+        $response = self::sendHttpRequest(RequestAlias::METHOD_POST, $payload, 'queue');
         if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
-        return QueuedMessageResource::collection($response->json());
+        $body = $response->json();
+        return response()->json([
+            'messages' => $body['messages'] ?? [],
+            'cursor' => $body['pagingState'] ?? null,
+            'hasMore' => $body['hasMore'] ?? false,
+        ]);
     }
 
     public function getQueueCount(): JsonResponse
