@@ -1088,9 +1088,26 @@ class FunapiClient extends ZApiClient
         $messages = $res->json() ?? [];
         $hasMore = count($messages) === $pageSize;
         return [
-            'messages' => $messages,
+            'messages' => array_map([$this, 'normalizeQueuedMessage'], $messages),
             'cursor' => $hasMore ? $this->encodeQueueCursor($page + 1) : null,
             'hasMore' => $hasMore,
+        ];
+    }
+
+    private function normalizeQueuedMessage(array $raw): array
+    {
+        $created = isset($raw['Created'])
+            ? \Carbon\Carbon::createFromTimestampMs($raw['Created'])->toIso8601String()
+            : null;
+
+        return [
+            'ZaapId' => $raw['ZaapId'] ?? null,
+            'messageId' => $raw['MessageId'] ?? null,
+            'message' => $raw['Message'] ?? '',
+            'created' => $created,
+            'phone' => $raw['Phone'] ?? null,
+            'fileUrl' => $raw['ImageUrl'] ?? $raw['DocumentUrl'] ?? $raw['VideoUrl'] ?? $raw['AudioUrl'] ?? '',
+            'caption' => $raw['Caption'] ?? '',
         ];
     }
 

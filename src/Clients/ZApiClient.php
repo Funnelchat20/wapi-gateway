@@ -838,9 +838,26 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         $body = $res->json();
         return [
-            'messages' => $body['messages'] ?? [],
+            'messages' => array_map([$this, 'normalizeQueuedMessage'], $body['messages'] ?? []),
             'cursor' => $body['pagingState'] ?? null,
             'hasMore' => $body['hasMore'] ?? false,
+        ];
+    }
+
+    private function normalizeQueuedMessage(array $raw): array
+    {
+        $created = isset($raw['Created'])
+            ? \Carbon\Carbon::createFromTimestampMs($raw['Created'])->toIso8601String()
+            : null;
+
+        return [
+            'ZaapId' => $raw['ZaapId'] ?? null,
+            'messageId' => $raw['MessageId'] ?? null,
+            'message' => $raw['Message'] ?? '',
+            'created' => $created,
+            'phone' => $raw['Phone'] ?? null,
+            'fileUrl' => $raw['ImageUrl'] ?? $raw['DocumentUrl'] ?? $raw['VideoUrl'] ?? $raw['AudioUrl'] ?? '',
+            'caption' => $raw['Caption'] ?? '',
         ];
     }
 
