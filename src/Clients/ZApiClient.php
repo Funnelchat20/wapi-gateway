@@ -836,8 +836,9 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         try {
             $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->post($url, $payload);
         } catch (ConnectionException|RequestException $e) {
-            $this->logRequest('showQueue', $uid, ['error' => $e->getMessage()], $startTime, null, $url, $payload);
-            return ['error' => $this->formatError($e->getMessage())];
+            $sanitizedError = $this->sanitizeUrl($e->getMessage());
+            $this->logRequest('showQueue', $uid, ['error' => $sanitizedError], $startTime, null, $url, $payload);
+            return ['error' => $this->formatError($sanitizedError)];
         }
         $this->logRequest('showQueue', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];

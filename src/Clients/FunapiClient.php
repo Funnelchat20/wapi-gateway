@@ -1088,8 +1088,9 @@ class FunapiClient extends ZApiClient
         try {
             $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url, $params);
         } catch (ConnectionException|\Illuminate\Http\Client\RequestException $e) {
-            $this->logRequest('showQueue', $uid, ['error' => $e->getMessage()], $startTime, null, $url);
-            return ['error' => $this->formatError($e->getMessage())];
+            $sanitizedError = $this->sanitizeUrl($e->getMessage());
+            $this->logRequest('showQueue', $uid, ['error' => $sanitizedError], $startTime, null, $url);
+            return ['error' => $this->formatError($sanitizedError)];
         }
         $this->logRequest('showQueue', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
