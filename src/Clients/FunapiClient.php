@@ -1081,8 +1081,16 @@ class FunapiClient extends ZApiClient
         $url = $this->buildUrl($uid, $token, 'queue');
         $pageSize = (int) ($options['pageSize'] ?? 20);
         $page = $this->decodeQueueCursor($options['cursor'] ?? null);
+        if ($page === null) {
+            return ['error' => $this->formatError('invalid cursor')];
+        }
         $params = ['page' => $page, 'pageSize' => $pageSize];
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url, $params);
+        try {
+            $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url, $params);
+        } catch (ConnectionException|\Illuminate\Http\Client\RequestException $e) {
+            $this->logRequest('showQueue', $uid, ['error' => $e->getMessage()], $startTime, null, $url);
+            return ['error' => $this->formatError($e->getMessage())];
+        }
         $this->logRequest('showQueue', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         $messages = $res->json() ?? [];
@@ -1111,11 +1119,15 @@ class FunapiClient extends ZApiClient
         ];
     }
 
-    private function decodeQueueCursor(?string $cursor): int
+    private function decodeQueueCursor(?string $cursor): ?int
     {
         if (empty($cursor)) return 1;
-        $decoded = json_decode(base64_decode($cursor, true) ?: '', true);
-        return is_array($decoded) && isset($decoded['page']) ? max(1, (int) $decoded['page']) : 1;
+        $raw = base64_decode($cursor, true);
+        if ($raw === false) return null;
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded) || !isset($decoded['page']) || !is_numeric($decoded['page'])) return null;
+        $page = (int) $decoded['page'];
+        return $page >= 1 ? $page : null;
     }
 
     private function encodeQueueCursor(int $page): string
