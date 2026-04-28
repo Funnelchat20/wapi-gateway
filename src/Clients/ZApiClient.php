@@ -837,11 +837,40 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     {
         $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'queue'], $this->baseUrl());
-        $params = ['page' => $options['page'] ?? 1, 'pageSize' => $options['pageSize'] ?? 499];
-        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->get($url, $params);
-        $this->logRequest('showQueue', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
+        $payload = ['pageSize' => min((int) ($options['pageSize'] ?? 20), 30)];
+        if (!empty($options['cursor'])) $payload['pagingState'] = $options['cursor'];
+        try {
+            $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->post($url, $payload);
+        } catch (ConnectionException|RequestException $e) {
+            $sanitizedError = $this->sanitizeUrl($e->getMessage());
+            $this->logRequest('showQueue', $uid, ['error' => $sanitizedError], $startTime, null, $url, $payload);
+            return ['error' => $this->formatError($sanitizedError)];
+        }
+        $this->logRequest('showQueue', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return $res->json();
+        $body = $res->json();
+        return [
+            'messages' => array_map([$this, 'normalizeQueuedMessage'], $body['messages'] ?? []),
+            'cursor' => $body['pagingState'] ?? null,
+            'hasMore' => $body['hasMore'] ?? false,
+        ];
+    }
+
+    private function normalizeQueuedMessage(array $raw): array
+    {
+        $created = isset($raw['Created'])
+            ? \Carbon\Carbon::createFromTimestampMs($raw['Created'])->toIso8601String()
+            : null;
+
+        return [
+            'ZaapId' => $raw['ZaapId'] ?? null,
+            'messageId' => $raw['MessageId'] ?? null,
+            'message' => $raw['Message'] ?? '',
+            'created' => $created,
+            'phone' => $raw['Phone'] ?? null,
+            'fileUrl' => $raw['ImageUrl'] ?? $raw['DocumentUrl'] ?? $raw['VideoUrl'] ?? $raw['AudioUrl'] ?? '',
+            'caption' => $raw['Caption'] ?? '',
+        ];
     }
 
     public function queueCount(string $uid, string $token): array

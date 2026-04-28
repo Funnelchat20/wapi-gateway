@@ -1107,11 +1107,61 @@ class FunapiClient extends ZApiClient
     {
         $startTime = microtime(true);
         $url = $this->buildUrl($uid, $token, 'queue');
-        $params = ['page' => $options['page'] ?? 1, 'pageSize' => $options['pageSize'] ?? 499];
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url, $params);
+        $pageSize = (int) ($options['pageSize'] ?? 20);
+        $page = $this->decodeQueueCursor($options['cursor'] ?? null);
+        if ($page === null) {
+            return ['error' => $this->formatError('invalid cursor')];
+        }
+        $params = ['page' => $page, 'pageSize' => $pageSize];
+        try {
+            $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url, $params);
+        } catch (ConnectionException|\Illuminate\Http\Client\RequestException $e) {
+            $sanitizedError = $this->sanitizeUrl($e->getMessage());
+            $this->logRequest('showQueue', $uid, ['error' => $sanitizedError], $startTime, null, $url);
+            return ['error' => $this->formatError($sanitizedError)];
+        }
         $this->logRequest('showQueue', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return $res->json();
+        $messages = $res->json() ?? [];
+        $hasMore = count($messages) === $pageSize;
+        return [
+            'messages' => array_map([$this, 'normalizeQueuedMessage'], $messages),
+            'cursor' => $hasMore ? $this->encodeQueueCursor($page + 1) : null,
+            'hasMore' => $hasMore,
+        ];
+    }
+
+    private function normalizeQueuedMessage(array $raw): array
+    {
+        $created = isset($raw['Created'])
+            ? \Carbon\Carbon::createFromTimestampMs($raw['Created'])->toIso8601String()
+            : null;
+
+        return [
+            'ZaapId' => $raw['ZaapId'] ?? null,
+            'messageId' => $raw['MessageId'] ?? null,
+            'message' => $raw['Message'] ?? '',
+            'created' => $created,
+            'phone' => $raw['Phone'] ?? null,
+            'fileUrl' => $raw['ImageUrl'] ?? $raw['DocumentUrl'] ?? $raw['VideoUrl'] ?? $raw['AudioUrl'] ?? '',
+            'caption' => $raw['Caption'] ?? '',
+        ];
+    }
+
+    private function decodeQueueCursor(?string $cursor): ?int
+    {
+        if (empty($cursor)) return 1;
+        $raw = base64_decode($cursor, true);
+        if ($raw === false) return null;
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded) || !isset($decoded['page']) || !is_numeric($decoded['page'])) return null;
+        $page = (int) $decoded['page'];
+        return $page >= 1 ? $page : null;
+    }
+
+    private function encodeQueueCursor(int $page): string
+    {
+        return base64_encode(json_encode(['page' => $page]));
     }
 
     public function queueCount(string $uid, string $token): array
