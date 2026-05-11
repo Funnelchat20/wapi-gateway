@@ -48,21 +48,16 @@ class WhatsAppCloudHelper
         ];
     }
 
-    public static function getParamsTemplate(?array $params): string
+    public static function getParamsTemplate(?array $params): array
     {
-        $result = '';
-        if (!empty($params)) {
-            foreach ($params as $value) {
-                if (is_array($value)) {
-                    foreach ($value as $sub) {
-                        $result .= '"' . $sub . '",';
-                    }
-                } else {
-                    $result .= '"' . $value . '",';
-                }
-            }
+        if (empty($params)) {
+            return [];
         }
-        return rtrim($result, ',');
+        $flat = [];
+        array_walk_recursive($params, function ($value) use (&$flat) {
+            $flat[] = (string) $value;
+        });
+        return $flat;
     }
 
     public static function getButtonsTemplate(array $buttonsParam): array
