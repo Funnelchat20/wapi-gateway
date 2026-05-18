@@ -683,6 +683,11 @@ class UazapiController implements WhatsAppProviderControllerInterface
         return response()->noContent();
     }
 
+    public function updateCommunityDescription(Request $request): \Illuminate\Http\Response|JsonResponse
+    {
+        return response()->json(['error' => 'unsupported'], Response::HTTP_CONFLICT);
+    }
+
     public function updateGroupSettings(Request $request): \Illuminate\Http\Response|JsonResponse
     {
         $validated = $request->validate([

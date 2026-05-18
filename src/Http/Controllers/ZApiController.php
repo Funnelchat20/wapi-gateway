@@ -531,6 +531,20 @@ class ZApiController
         return response()->noContent();
     }
 
+    public function updateCommunityDescription(Request $request): \Illuminate\Http\Response|JsonResponse
+    {
+        $validated = $request->validate([
+            'id' => ['string', 'required'],
+            'description' => ['string', 'required'],
+        ]);
+        $response = $this->sendHttpRequest(RequestAlias::METHOD_POST, [
+            'communityId' => $validated['id'],
+            'communityDescription' => $validated['description']
+        ], 'update-community-description');
+        if ($response->failed() || $response->json('error')) return response()->json(['error' => self::getFormattedError($response->json('error'))], Response::HTTP_CONFLICT);
+        return response()->noContent();
+    }
+
     public function updateGroupSettings(Request $request): \Illuminate\Http\Response|JsonResponse
     {
         $validated = $request->validate([

@@ -22,6 +22,7 @@ interface GroupsContract
     public function communities(string $uid, string $token, array $options = []): array;
     public function communitiesMetadata(string $uid, string $token, string $id): array;
     public function community(string $uid, string $token, array $data): array;
+    public function updateCommunityDescription(string $uid, string $token, string $id, string $description): array;
     public function groupInvitationMetadata(string $uid, string $token, string $url): array;
     public function chats(string $uid, string $token, array $options = []): array;
     public function deleteChat(string $uid, string $token, string $phone): array;

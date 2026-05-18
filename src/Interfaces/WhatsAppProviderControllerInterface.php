@@ -40,6 +40,7 @@ interface WhatsAppProviderControllerInterface
     public function community(Request $request);
     public function communities(Request $request);
     public function communitiesMetadata(Request $request);
+    public function updateCommunityDescription(Request $request);
     public function chats(Request $request);
     public function deleteChat(Request $request);
     public function deleteMessage(Request $request);
