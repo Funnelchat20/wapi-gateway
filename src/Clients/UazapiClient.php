@@ -566,6 +566,11 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return ['success' => true];
     }
 
+    public function updateCommunityDescription(string $uid, string $token, string $id, string $description): array
+    {
+        return ['error' => 'unsupported'];
+    }
+
     public function updateGroupSettings(string $uid, string $token, string $id, bool $adminOnlyMessage, bool $adminOnlySettings): array
     {
         $startTime = microtime(true);

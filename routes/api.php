@@ -55,6 +55,7 @@ Route::middleware('api')->prefix('api')->group(function () {
                 Route::post('community', 'community');
                 Route::get('communities', 'communities');
                 Route::get('community', 'communitiesMetadata');
+                Route::post('update-community-description', 'updateCommunityDescription');
                 Route::get('chats', 'chats');
                 Route::post('delete-chat', 'deleteChat');
                 Route::post('delete-message', 'deleteMessage');
