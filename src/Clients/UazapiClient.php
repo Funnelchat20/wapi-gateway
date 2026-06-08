@@ -13,6 +13,7 @@ use Funnelchat\WapiGateway\Resources\Uazapi\MeResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\LogOutResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\RebootResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\CheckPhoneResource;
+use Funnelchat\WapiGateway\Resources\Uazapi\CheckPhoneWhatsappResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\ContactResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\GroupsResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\GroupResource;
@@ -260,6 +261,16 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         $this->logRequest('checkPhone', $uid, $res->failed() ? ['error' => $res->json('message') ?? $res->json('error') ?? 'error', 'phone' => $phone] : ['phone' => $phone], $startTime, $res, $url);
         if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
         return CheckPhoneResource::make($res->json());
+    }
+
+    public function checkPhoneWhatsapp(string $uid, string $token, string $phone): array
+    {
+        $startTime = microtime(true);
+        $url = config('uazapi.base_url') . '/contact/checkPhone/' . $phone;
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 30))->get($url);
+        $this->logRequest('checkPhoneWhatsapp', $uid, $res->failed() ? ['error' => $res->json('message') ?? $res->json('error') ?? 'error', 'phone' => $phone] : ['phone' => $phone], $startTime, $res, $url);
+        if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
+        return CheckPhoneWhatsappResource::make($res->json());
     }
 
     public function subscribe(string $uid, string $token): array

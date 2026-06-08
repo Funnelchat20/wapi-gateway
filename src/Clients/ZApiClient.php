@@ -13,6 +13,7 @@ use Funnelchat\WapiGateway\Resources\Zapi\MeResource;
 use Funnelchat\WapiGateway\Resources\Zapi\LogOutResource;
 use Funnelchat\WapiGateway\Resources\Zapi\RebootResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CheckPhoneResource;
+use Funnelchat\WapiGateway\Resources\Zapi\CheckPhoneWhatsappResource;
 use Funnelchat\WapiGateway\Resources\Zapi\ContactResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupsResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupResource;
@@ -221,6 +222,16 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $this->logRequest('checkPhone', $uid, $res->failed() ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed()) return ['error' => $this->formatError($res->json('error', 'error'))];
         return CheckPhoneResource::make($res->json());
+    }
+
+    public function checkPhoneWhatsapp(string $uid, string $token, string $phone): array
+    {
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'phone-exists/' . $phone], $this->baseUrl());
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->get($url);
+        $this->logRequest('checkPhoneWhatsapp', $uid, $res->failed() ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
+        if ($res->failed()) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return CheckPhoneWhatsappResource::make($res->json());
     }
 
     public function subscribe(string $uid, string $token): array
