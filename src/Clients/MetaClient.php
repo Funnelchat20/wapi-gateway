@@ -52,6 +52,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     public function me(string $uid, string $token): array { return ['error' => 'Not supported']; }
     public function checkPhone(string $uid, string $token, string $phone): array { return ['error' => 'Not supported']; }
     public function checkPhoneWhatsapp(string $uid, string $token, string $phone): array { return ['error' => 'Not supported']; }
+    public function checkPhonesBatch(string $uid, string $token, array $phones): array { return ['error' => 'Not supported']; }
     public function subscribe(string $uid, string $token): array { return ['error' => 'Not supported']; }
     public function unsubscribe(string $uid, string $token): array { return ['error' => 'Not supported']; }
     public function getParticipants(string $uid, string $token, string $phone): array { return []; }
