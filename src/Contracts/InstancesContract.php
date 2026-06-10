@@ -12,6 +12,7 @@ interface InstancesContract
     public function me(string $uid, string $token): array;
     public function checkPhone(string $uid, string $token, string $phone): array;
     public function checkPhoneWhatsapp(string $uid, string $token, string $phone): array;
+    public function checkPhonesBatch(string $uid, string $token, array $phones): array;
     public function subscribe(string $uid, string $token): array;
     public function unsubscribe(string $uid, string $token): array;
     public function getParticipants(string $uid, string $token, string $phone): array;

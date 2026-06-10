@@ -14,6 +14,7 @@ use Funnelchat\WapiGateway\Resources\Zapi\LogOutResource;
 use Funnelchat\WapiGateway\Resources\Zapi\RebootResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CheckPhoneResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CheckPhoneWhatsappResource;
+use Funnelchat\WapiGateway\Resources\Zapi\CheckPhonesBatchResource;
 use Funnelchat\WapiGateway\Resources\Zapi\ContactResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupsResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupResource;
@@ -232,6 +233,17 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $this->logRequest('checkPhoneWhatsapp', $uid, $res->failed() ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed()) return ['error' => $this->formatError($res->json('error', 'error'))];
         return CheckPhoneWhatsappResource::make($res->json());
+    }
+
+    public function checkPhonesBatch(string $uid, string $token, array $phones): array
+    {
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'phone-exists-batch'], $this->baseUrl());
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
+            ->post($url, ['phones' => array_values($phones)]);
+        $this->logRequest('checkPhonesBatch', $uid, $res->failed() ? ['error' => $res->json('error', 'error')] : ['count' => count($phones)], $startTime, $res, $url, ['phones_count' => count($phones)]);
+        if ($res->failed()) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return CheckPhonesBatchResource::make($res->json());
     }
 
     public function subscribe(string $uid, string $token): array

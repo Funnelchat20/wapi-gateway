@@ -273,6 +273,12 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return CheckPhoneWhatsappResource::make($res->json());
     }
 
+    public function checkPhonesBatch(string $uid, string $token, array $phones): array
+    {
+        // Uazapi has no equivalent batch phone-exists endpoint; not reachable from the communities flow.
+        return ['error' => 'Not supported'];
+    }
+
     public function subscribe(string $uid, string $token): array
     {
         return ['error' => 'Not supported'];
