@@ -65,7 +65,8 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $type = $this->mapType($ext);
         if ($type === 'invalid') return ['error' => 'Invalid file extension'];
-        $payload = ['messaging_product' => 'whatsapp', 'to' => $to, 'type' => $type, $type => ['link' => $fileUrl]];
+        $media = isset($options['mediaId']) ? ['id' => $options['mediaId']] : ['link' => $fileUrl];
+        $payload = ['messaging_product' => 'whatsapp', 'to' => $to, 'type' => $type, $type => $media];
         if (isset($options['fileName']) && $type === 'document') $payload[$type]['filename'] = $options['fileName'];
         if (isset($options['caption']) && in_array($type, ['image', 'video', 'document'])) $payload[$type]['caption'] = $options['caption'];
         $url = $this->graph . $uid . '/messages';
@@ -401,6 +402,28 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             return ['error' => $res->json('error', 'Failed to delete')];
         }
         $this->logRequest('deleteTemplate', $wabaId, [], $startTime, $res, $url);
+        return $res->json();
+    }
+
+    public function uploadMedia(string $uid, string $token, string $fileKey, ?string $mime = null): array
+    {
+        $startTime = microtime(true);
+        $fileUrl = config('wapi-gateway.aws_bucket_url') . '/' . $fileKey;
+        $fileContent = @file_get_contents($fileUrl);
+        if ($fileContent === false) return ['error' => 'File not found'];
+        if ($mime === null) {
+            $mime = (new \finfo(FILEINFO_MIME_TYPE))->buffer($fileContent) ?: 'application/octet-stream';
+        }
+        $url = $this->graph . $uid . '/media';
+        $payload = ['messaging_product' => 'whatsapp', 'type' => $mime, 'file_key' => $fileKey];
+        $res = Http::withToken($token)
+            ->attach('file', $fileContent, basename($fileKey), ['Content-Type' => $mime])
+            ->post($url, ['messaging_product' => 'whatsapp', 'type' => $mime]);
+        if ($res->failed() || $res->json('error')) {
+            $this->logRequest('uploadMedia', $uid, ['error' => $res->json('error', 'Failed to upload'), 'file_key' => $fileKey], $startTime, $res, $url, $payload);
+            return ['error' => $res->json('error', 'Failed to upload')];
+        }
+        $this->logRequest('uploadMedia', $uid, ['file_key' => $fileKey, 'mime' => $mime], $startTime, $res, $url, $payload);
         return $res->json();
     }
 
