@@ -415,14 +415,15 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             $mime = (new \finfo(FILEINFO_MIME_TYPE))->buffer($fileContent) ?: 'application/octet-stream';
         }
         $url = $this->graph . $uid . '/media';
+        $payload = ['messaging_product' => 'whatsapp', 'type' => $mime, 'file_key' => $fileKey];
         $res = Http::withToken($token)
             ->attach('file', $fileContent, basename($fileKey), ['Content-Type' => $mime])
             ->post($url, ['messaging_product' => 'whatsapp', 'type' => $mime]);
         if ($res->failed() || $res->json('error')) {
-            $this->logRequest('uploadMedia', $uid, ['error' => $res->json('error', 'Failed to upload')], $startTime, $res, $url);
+            $this->logRequest('uploadMedia', $uid, ['error' => $res->json('error', 'Failed to upload'), 'file_key' => $fileKey], $startTime, $res, $url, $payload);
             return ['error' => $res->json('error', 'Failed to upload')];
         }
-        $this->logRequest('uploadMedia', $uid, [], $startTime, $res, $url);
+        $this->logRequest('uploadMedia', $uid, ['file_key' => $fileKey, 'mime' => $mime], $startTime, $res, $url, $payload);
         return $res->json();
     }
 
