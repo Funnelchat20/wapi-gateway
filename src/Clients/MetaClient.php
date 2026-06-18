@@ -273,6 +273,25 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return ['error' => 'Not supported'];
     }
 
+    public function sendTypingIndicator(string $uid, string $token, string $to): array
+    {
+        $startTime = microtime(true);
+        $url = $this->graph . $uid . '/messages';
+        $payload = [
+            'messaging_product' => 'whatsapp',
+            'recipient_type' => 'individual',
+            'to' => $to,
+            'type' => 'typing',
+        ];
+        $res = Http::withToken($token)->post($url, $payload);
+        if ($res->failed()) {
+            $this->logRequest('sendTypingIndicator', $uid, ['error' => $res->json('error', 'Failed to send typing'), 'phone' => $to], $startTime, $res, $url, $payload);
+            return ['error' => $res->json('error', 'Failed to send typing indicator')];
+        }
+        $this->logRequest('sendTypingIndicator', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
+        return ['success' => true];
+    }
+
     public function addContacts(string $uid, string $token, array $contacts): array
     {
         return ['error' => 'Not supported'];
