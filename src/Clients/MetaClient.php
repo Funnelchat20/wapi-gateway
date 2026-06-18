@@ -281,7 +281,8 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'messaging_product' => 'whatsapp',
             'recipient_type' => 'individual',
             'to' => $to,
-            'type' => 'typing',
+            'type' => 'typing_indicator',
+            'typing_indicator' => ['type' => 'text'],
         ];
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
