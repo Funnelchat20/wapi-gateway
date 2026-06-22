@@ -74,8 +74,10 @@ class FunapiInstanceController extends Controller implements WhatsAppProviderIns
         $uid = $response->json('id');
         $token = $response->json('token');
         $payload = ['uid' => $uid, 'token' => $token];
-        if (!empty($validated['proxy_url']) && $uid && $token) {
-            $payload['proxy_configured'] = $this->applyProxyOnCreate($uid, $token, $validated['proxy_url'], $deviceId);
+        if (!empty($validated['proxy_url'])) {
+            $payload['proxy_configured'] = ($uid && $token)
+                ? $this->applyProxyOnCreate($uid, $token, $validated['proxy_url'], $deviceId)
+                : false;
         }
         return response()->json($payload);
     }

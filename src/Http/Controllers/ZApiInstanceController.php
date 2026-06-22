@@ -69,8 +69,10 @@ class ZApiInstanceController extends Controller implements WhatsAppProviderInsta
         $uid = $response->json('id');
         $token = $response->json('token');
         $payload = ['uid' => $uid, 'token' => $token];
-        if (!empty($validated['proxy_url']) && $uid && $token) {
-            $payload['proxy_configured'] = $this->applyProxyOnCreate($uid, $token, $validated['proxy_url'], $deviceId);
+        if (!empty($validated['proxy_url'])) {
+            $payload['proxy_configured'] = ($uid && $token)
+                ? $this->applyProxyOnCreate($uid, $token, $validated['proxy_url'], $deviceId)
+                : false;
         }
         return response()->json($payload);
     }
@@ -82,7 +84,7 @@ class ZApiInstanceController extends Controller implements WhatsAppProviderInsta
      */
     protected function sendProxyConfig(string $uid, string $token, ?string $proxyUrl): ClientResponse
     {
-        $url = str_replace(['UID', 'TOKEN'], [$uid, $token], config('zapi.proxy_url'));
+        $url = str_replace(['UID', 'TOKEN'], [Str::before($uid, '-'), $token], config('zapi.proxy_url'));
         return Http::withToken(config('zapi.token'))
             ->timeout(self::PROXY_CONFIG_TIMEOUT)
             ->put($url, [

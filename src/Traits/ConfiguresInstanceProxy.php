@@ -6,7 +6,6 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response as ClientResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -32,9 +31,8 @@ trait ConfiguresInstanceProxy
     public function configureProxy(Request $request, string $uid, string $token): JsonResponse
     {
         $validated = $request->validate(['proxy_url' => self::PROXY_URL_RULES]);
-        $instanceUid = Str::before($uid, '-');
         try {
-            $response = $this->sendProxyConfig($instanceUid, $token, $validated['proxy_url'] ?? null);
+            $response = $this->sendProxyConfig($uid, $token, $validated['proxy_url'] ?? null);
             if ($this->proxyConfigFailed($response)) {
                 return response()->json([
                     'message' => 'Failed to configure proxy',
@@ -43,10 +41,10 @@ trait ConfiguresInstanceProxy
             }
             return response()->json(['value' => $response->json('value')]);
         } catch (ConnectionException $e) {
-            logger()->error('deviceUid #' . $instanceUid . ' configure proxy failed (ConnectionException)', ['uid' => $uid, 'error' => $e->getMessage()]);
+            logger()->error('deviceUid #' . $uid . ' configure proxy failed (ConnectionException)', ['uid' => $uid, 'error' => $e->getMessage()]);
             return response()->json(['message' => $e->getMessage()], Response::HTTP_BAD_GATEWAY);
         } catch (\Throwable $e) {
-            logger()->error('deviceUid #' . $instanceUid . ' configure proxy failed (Throwable)', ['uid' => $uid, 'error' => $e->getMessage()]);
+            logger()->error('deviceUid #' . $uid . ' configure proxy failed (Throwable)', ['uid' => $uid, 'error' => $e->getMessage()]);
             return response()->json(['message' => $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
@@ -85,7 +83,8 @@ trait ConfiguresInstanceProxy
     /**
      * Perform the provider-specific proxy configuration request. A non-empty
      * `$proxyUrl` enables the proxy; an empty/null value disables and clears it.
-     * `$uid` is already stripped of any `-` suffix.
+     * `$uid` is passed verbatim — each provider normalizes it as needed (Z-API
+     * strips a `-` suffix; Funapi keeps the full UUID).
      */
     abstract protected function sendProxyConfig(string $uid, string $token, ?string $proxyUrl): ClientResponse;
 }
