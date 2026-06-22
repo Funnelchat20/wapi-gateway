@@ -14,7 +14,6 @@ Route::middleware('api')->prefix('api')->group(function () {
             Route::post('subscribe', [WhatsAppProviderInstanceInterface::class, 'subscribe']);
             Route::post('unsubscribe', [WhatsAppProviderInstanceInterface::class, 'unsubscribe']);
             Route::post('get-participants/{phone}', [ZApiInstanceController::class, 'getParticipants']);
-            Route::put('proxy', [ZApiInstanceController::class, 'configureProxy']);
         });
         Route::controller(WhatsAppProviderControllerInterface::class)
             ->group(function () {

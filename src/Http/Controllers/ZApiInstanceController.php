@@ -22,7 +22,11 @@ class ZApiInstanceController extends Controller implements WhatsAppProviderInsta
 
     public function create(Request $request): JsonResponse
     {
-        $validated = $request->validate(['user_id' => 'required|int', 'device_id' => 'required|int']);
+        $validated = $request->validate([
+            'user_id' => 'required|int',
+            'device_id' => 'required|int',
+            'proxy_url' => 'nullable|string',
+        ]);
         $userId = $validated['user_id'];
         $deviceId = $validated['device_id'];
         $name = 'U-' . $userId . ' D-' . $deviceId;
@@ -58,7 +62,41 @@ class ZApiInstanceController extends Controller implements WhatsAppProviderInsta
             ]);
             return response()->json(['message' => $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
-        return response()->json(['uid' => $response->json('id'), 'token' => $response->json('token')]);
+        $uid = $response->json('id');
+        $token = $response->json('token');
+        if (!empty($validated['proxy_url'])) {
+            $this->configureProxy($uid, $token, $validated['proxy_url'], $deviceId);
+        }
+        return response()->json(['uid' => $uid, 'token' => $token]);
+    }
+
+    /**
+     * Configure the proxy for a freshly created Z-API instance via the partner
+     * integrator endpoint. Failures are logged but do not abort instance creation,
+     * mirroring Z-API's own fallback (it connects without proxy after retries).
+     */
+    private function configureProxy(string $uid, string $token, string $proxyUrl, int $deviceId): void
+    {
+        $url = str_replace(['UID', 'TOKEN'], [Str::before($uid, '-'), $token], config('zapi.proxy_url'));
+        try {
+            $response = Http::withToken(config('zapi.token'))->put($url, [
+                'proxyUrl' => $proxyUrl,
+                'enable' => true,
+            ]);
+            if ($response->failed() || $response->json('error')) {
+                logger()->error('deviceId #' . $deviceId . ' ZApiInstanceController configureProxy error response', [
+                    'error' => $response->json('error') ?? self::UNKNOWN_ERROR_MESSAGE,
+                    'deviceId' => $deviceId,
+                    'url' => $url,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            logger()->error('deviceId #' . $deviceId . ' ZApiInstanceController configureProxy exception', [
+                'error' => $e->getMessage(),
+                'deviceId' => $deviceId,
+                'url' => $url,
+            ]);
+        }
     }
 
     public function subscribe(string $uid, string $token): JsonResponse
@@ -110,35 +148,6 @@ class ZApiInstanceController extends Controller implements WhatsAppProviderInsta
             return response()->json(['message' => $e->getMessage()], Response::HTTP_BAD_GATEWAY);
         } catch (\Throwable $e) {
             logger()->error('deviceUid #' . $instanceUid . ' Z-API unsubscribe failed (Throwable)', ['uid' => $uid, 'error' => $e->getMessage()]);
-            return response()->json(['message' => $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
-        }
-    }
-
-    public function configureProxy(Request $request, string $uid, string $token): JsonResponse
-    {
-        $validated = $request->validate([
-            'proxyUrl' => ['nullable', 'string'],
-            'enable' => ['required', 'boolean'],
-        ]);
-        $instanceUid = Str::before($uid, '-');
-        $url = str_replace(['UID', 'TOKEN'], [$instanceUid, $token], config('zapi.proxy_url'));
-        try {
-            $response = Http::withToken(config('zapi.token'))->put($url, [
-                'proxyUrl' => $validated['proxyUrl'] ?? '',
-                'enable' => $validated['enable'],
-            ]);
-            if ($response->failed() || $response->json('error')) {
-                return response()->json([
-                    'message' => 'Failed to configure proxy',
-                    'error' => $response->json('error') ?? self::UNKNOWN_ERROR_MESSAGE,
-                ], Response::HTTP_BAD_GATEWAY);
-            }
-            return response()->json(['value' => $response->json('value', true)]);
-        } catch (RequestException $e) {
-            logger()->error('deviceUid #' . $instanceUid . ' Z-API configure proxy failed (RequestException)', ['uid' => $uid, 'error' => $e->getMessage()]);
-            return response()->json(['message' => $e->getMessage()], Response::HTTP_BAD_GATEWAY);
-        } catch (\Throwable $e) {
-            logger()->error('deviceUid #' . $instanceUid . ' Z-API configure proxy failed (Throwable)', ['uid' => $uid, 'error' => $e->getMessage()]);
             return response()->json(['message' => $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
