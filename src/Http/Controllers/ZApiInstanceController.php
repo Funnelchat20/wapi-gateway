@@ -3,8 +3,10 @@
 namespace Funnelchat\WapiGateway\Http\Controllers;
 
 use Funnelchat\WapiGateway\Interfaces\WhatsAppProviderInstanceInterface;
+use Funnelchat\WapiGateway\Traits\ConfiguresInstanceProxy;
 use Illuminate\Routing\Controller;
 use GuzzleHttp\Exception\RequestException;
+use Illuminate\Http\Client\Response as ClientResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -13,14 +15,14 @@ use Symfony\Component\HttpFoundation\Response;
 
 class ZApiInstanceController extends Controller implements WhatsAppProviderInstanceInterface
 {
+    use ConfiguresInstanceProxy;
+
     private const SESSION_NAME = 'Funnelchat';
     private const DISCONNECTED = 'disconnect';
     private const LIGHT_GROUP_METADATA = 'light-group-metadata';
     private const INSTANCE_CREATION_ERROR_MESSAGE = 'Failed to create instance';
     private const FAILED_TO_FETCH_PARTICIPANTS_MESSAGE = 'Failed to fetch participants';
     private const UNKNOWN_ERROR_MESSAGE = 'Unknown error';
-    private const PROXY_URL_RULES = ['nullable', 'string', 'regex:/^(https?|socks[45]):\/\/.+/i'];
-    private const PROXY_CONFIG_TIMEOUT = 10;
 
     public function create(Request $request): JsonResponse
     {
@@ -74,63 +76,11 @@ class ZApiInstanceController extends Controller implements WhatsAppProviderInsta
     }
 
     /**
-     * Configure (or disable) the proxy for an already existing Z-API instance.
-     * Pass `proxy_url` to enable it; omit/empty it to disable and clear the proxy.
+     * Z-API enables the proxy via the partner integrator endpoint with the
+     * integrator token (Authorization: Bearer); `enable` is derived from whether a
+     * non-empty proxy URL was given. Used for both `zapi` and `zapilite`.
      */
-    public function configureProxy(Request $request, string $uid, string $token): JsonResponse
-    {
-        $validated = $request->validate(['proxy_url' => self::PROXY_URL_RULES]);
-        $instanceUid = Str::before($uid, '-');
-        try {
-            $response = $this->sendProxyConfig($uid, $token, $validated['proxy_url'] ?? null);
-            if ($response->failed() || $response->json('error')) {
-                return response()->json([
-                    'message' => 'Failed to configure proxy',
-                    'error' => $response->json('error') ?? self::UNKNOWN_ERROR_MESSAGE,
-                ], Response::HTTP_BAD_GATEWAY);
-            }
-            return response()->json(['value' => $response->json('value')]);
-        } catch (RequestException $e) {
-            logger()->error('deviceUid #' . $instanceUid . ' Z-API configure proxy failed (RequestException)', ['uid' => $uid, 'error' => $e->getMessage()]);
-            return response()->json(['message' => $e->getMessage()], Response::HTTP_BAD_GATEWAY);
-        } catch (\Throwable $e) {
-            logger()->error('deviceUid #' . $instanceUid . ' Z-API configure proxy failed (Throwable)', ['uid' => $uid, 'error' => $e->getMessage()]);
-            return response()->json(['message' => $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
-        }
-    }
-
-    /**
-     * Configure the proxy for a freshly created instance. Failures are logged but
-     * do not abort instance creation, mirroring Z-API's own fallback (it connects
-     * without proxy after retries). Returns whether the proxy was applied so the
-     * caller can surface the outcome instead of it failing silently.
-     */
-    private function applyProxyOnCreate(string $uid, string $token, string $proxyUrl, int $deviceId): bool
-    {
-        try {
-            $response = $this->sendProxyConfig($uid, $token, $proxyUrl);
-            if ($response->failed() || $response->json('error')) {
-                logger()->error('deviceId #' . $deviceId . ' ZApiInstanceController configureProxy error response', [
-                    'error' => $response->json('error') ?? self::UNKNOWN_ERROR_MESSAGE,
-                    'deviceId' => $deviceId,
-                ]);
-                return false;
-            }
-            return true;
-        } catch (\Throwable $e) {
-            logger()->error('deviceId #' . $deviceId . ' ZApiInstanceController configureProxy exception', [
-                'error' => $e->getMessage(),
-                'deviceId' => $deviceId,
-            ]);
-            return false;
-        }
-    }
-
-    /**
-     * Perform the PUT against the Z-API partner integrator configure-proxy endpoint.
-     * Enables the proxy when a non-empty URL is given; disables/clears it otherwise.
-     */
-    private function sendProxyConfig(string $uid, string $token, ?string $proxyUrl): \Illuminate\Http\Client\Response
+    protected function sendProxyConfig(string $uid, string $token, ?string $proxyUrl): ClientResponse
     {
         $url = str_replace(['UID', 'TOKEN'], [Str::before($uid, '-'), $token], config('zapi.proxy_url'));
         return Http::withToken(config('zapi.token'))

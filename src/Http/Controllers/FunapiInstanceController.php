@@ -3,8 +3,10 @@
 namespace Funnelchat\WapiGateway\Http\Controllers;
 
 use Funnelchat\WapiGateway\Interfaces\WhatsAppProviderInstanceInterface;
+use Funnelchat\WapiGateway\Traits\ConfiguresInstanceProxy;
 use Illuminate\Routing\Controller;
 use GuzzleHttp\Exception\RequestException;
+use Illuminate\Http\Client\Response as ClientResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -13,6 +15,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 class FunapiInstanceController extends Controller implements WhatsAppProviderInstanceInterface
 {
+    use ConfiguresInstanceProxy;
+
     private const SESSION_NAME = 'Funnelchat';
     private const DISCONNECTED = 'disconnect';
     private const LIGHT_GROUP_METADATA = 'light-group-metadata';
@@ -28,7 +32,11 @@ class FunapiInstanceController extends Controller implements WhatsAppProviderIns
 
     public function create(Request $request): JsonResponse
     {
-        $validated = $request->validate(['user_id' => 'required|int', 'device_id' => 'required|int']);
+        $validated = $request->validate([
+            'user_id' => 'required|int',
+            'device_id' => 'required|int',
+            'proxy_url' => self::PROXY_URL_RULES,
+        ]);
         $userId = $validated['user_id'];
         $deviceId = $validated['device_id'];
         $name = 'U-' . $userId . ' D-' . $deviceId;
@@ -63,7 +71,28 @@ class FunapiInstanceController extends Controller implements WhatsAppProviderIns
             ]);
             return response()->json(['message' => $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
-        return response()->json(['uid' => $response->json('id'), 'token' => $response->json('token')]);
+        $uid = $response->json('id');
+        $token = $response->json('token');
+        $payload = ['uid' => $uid, 'token' => $token];
+        if (!empty($validated['proxy_url'])) {
+            $payload['proxy_configured'] = $this->applyProxyOnCreate($uid, $token, $validated['proxy_url'], $deviceId);
+        }
+        return response()->json($payload);
+    }
+
+    /**
+     * Funapi (whatsgo) configures the proxy on the instance-scoped endpoint with the
+     * Client-Token header: a non-empty URL is set via PUT /update-proxy, an empty one
+     * clears it via DELETE /proxy (whatsgo has no `enable` flag).
+     */
+    protected function sendProxyConfig(string $uid, string $token, ?string $proxyUrl): ClientResponse
+    {
+        $request = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
+            ->timeout(self::PROXY_CONFIG_TIMEOUT);
+        if (empty($proxyUrl)) {
+            return $request->delete($this->buildUrl($uid, $token, 'proxy'));
+        }
+        return $request->put($this->buildUrl($uid, $token, 'update-proxy'), ['proxyUrl' => $proxyUrl]);
     }
 
     public function subscribe(string $uid, string $token): JsonResponse
