@@ -18,11 +18,18 @@ use Symfony\Component\HttpFoundation\Response;
  */
 trait ConfiguresInstanceProxy
 {
-    /** Accepted proxy URL schemes: http, https, socks4, socks5. */
-    private const PROXY_URL_RULES = ['nullable', 'string', 'regex:/^(https?|socks[45]):\/\/.+/i'];
+    /**
+     * Accepted proxy URL schemes (http, https, socks4, socks5). An empty string
+     * is allowed too so callers can clear/disable the proxy without relying on the
+     * host app's ConvertEmptyStringsToNull middleware.
+     */
+    private const PROXY_URL_RULES = ['nullable', 'string', 'regex:/^$|^(https?|socks[45]):\/\/.+/i'];
 
     /** Max seconds to wait on the upstream proxy-config call. */
     private const PROXY_CONFIG_TIMEOUT = 10;
+
+    /** Fallback error text when the upstream returns no error detail. */
+    private const UNKNOWN_PROXY_ERROR = 'Unknown error';
 
     /**
      * Configure (or disable) the proxy for an already existing instance.
@@ -36,31 +43,37 @@ trait ConfiguresInstanceProxy
             if ($this->proxyConfigFailed($response)) {
                 return response()->json([
                     'message' => 'Failed to configure proxy',
-                    'error' => $response->json('error') ?? 'Unknown error',
+                    'error' => $response->json('error') ?? self::UNKNOWN_PROXY_ERROR,
                 ], Response::HTTP_BAD_GATEWAY);
             }
             return response()->json(['value' => $response->json('value')]);
         } catch (ConnectionException $e) {
-            logger()->error('deviceUid #' . $uid . ' configure proxy failed (ConnectionException)', ['uid' => $uid, 'error' => $e->getMessage()]);
-            return response()->json(['message' => $e->getMessage()], Response::HTTP_BAD_GATEWAY);
+            $error = $this->redactToken($e->getMessage(), $token);
+            logger()->error('deviceUid #' . $uid . ' configure proxy failed (ConnectionException)', ['uid' => $uid, 'error' => $error]);
+            return response()->json(['message' => $error], Response::HTTP_BAD_GATEWAY);
         } catch (\Throwable $e) {
-            logger()->error('deviceUid #' . $uid . ' configure proxy failed (Throwable)', ['uid' => $uid, 'error' => $e->getMessage()]);
-            return response()->json(['message' => $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
+            $error = $this->redactToken($e->getMessage(), $token);
+            logger()->error('deviceUid #' . $uid . ' configure proxy failed (Throwable)', ['uid' => $uid, 'error' => $error]);
+            return response()->json(['message' => $error], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
     /**
      * Configure the proxy for a freshly created instance. Failures are logged but
      * do not abort instance creation. Returns whether the proxy was applied so the
-     * caller can surface the outcome instead of it failing silently.
+     * caller can surface the outcome instead of it failing silently; returns false
+     * when the create response lacked a usable uid/token.
      */
-    private function applyProxyOnCreate(string $uid, string $token, string $proxyUrl, int $deviceId): bool
+    private function applyProxyOnCreate(?string $uid, ?string $token, string $proxyUrl, int $deviceId): bool
     {
+        if (empty($uid) || empty($token)) {
+            return false;
+        }
         try {
             $response = $this->sendProxyConfig($uid, $token, $proxyUrl);
             if ($this->proxyConfigFailed($response)) {
                 logger()->error('deviceId #' . $deviceId . ' configureProxy error response', [
-                    'error' => $response->json('error') ?? 'Unknown error',
+                    'error' => $response->json('error') ?? self::UNKNOWN_PROXY_ERROR,
                     'deviceId' => $deviceId,
                 ]);
                 return false;
@@ -68,7 +81,7 @@ trait ConfiguresInstanceProxy
             return true;
         } catch (\Throwable $e) {
             logger()->error('deviceId #' . $deviceId . ' configureProxy exception', [
-                'error' => $e->getMessage(),
+                'error' => $this->redactToken($e->getMessage(), $token),
                 'deviceId' => $deviceId,
             ]);
             return false;
@@ -78,6 +91,12 @@ trait ConfiguresInstanceProxy
     private function proxyConfigFailed(ClientResponse $response): bool
     {
         return $response->failed() || $response->json('error');
+    }
+
+    /** Strip the instance token from upstream error messages before logging/returning it. */
+    private function redactToken(string $message, ?string $token): string
+    {
+        return empty($token) ? $message : str_replace($token, '***', $message);
     }
 
     /**
