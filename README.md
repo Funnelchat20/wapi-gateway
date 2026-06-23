@@ -93,6 +93,15 @@ $data = WapiGateway::instances(ProviderEnum::ZApi)->create($userId, $deviceId);
 // Obtener estado
 $status = WapiGateway::instances(ProviderEnum::ZApi)->status($uid, $token);
 // Incluye 'accountStatus' y 'qrCode' automáticamente
+
+// Configurar (o deshabilitar) el proxy de una instancia existente
+$res = WapiGateway::instances(ProviderEnum::ZApi)->configureProxy($uid, $token, $proxyUrl);
+// $proxyUrl = 'http://user:pass@host:port' (esquemas: http/https/socks4/socks5)
+// $proxyUrl = null | '' deshabilita y limpia el proxy
+// $res = ['proxy_configured' => true] | ['proxy_configured' => false, 'error' => '...']
+// Nunca lanza: los fallos se loguean y se devuelven en 'error'.
+// Soportado en zapi/zapilite/funapi; Meta/Uazapi devuelven proxy_configured=false.
+// zapi/zapilite requieren la clave config `proxy_url` (endpoint integrator configure-proxy).
 ```
 
 ## Compatibilidad de Proveedores

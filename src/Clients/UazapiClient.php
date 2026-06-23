@@ -284,6 +284,11 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return ['error' => 'Not supported'];
     }
 
+    public function configureProxy(string $uid, string $token, ?string $proxyUrl): array
+    {
+        return ['proxy_configured' => false, 'error' => 'Proxy configuration is not supported for this provider'];
+    }
+
     public function unsubscribe(string $uid, string $token): array
     {
         $startTime = microtime(true);

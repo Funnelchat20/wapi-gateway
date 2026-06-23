@@ -20,6 +20,7 @@ use Funnelchat\WapiGateway\Resources\Zapi\CreateGroupResource;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Response as ClientResponse;
 
 class FunapiClient extends ZApiClient
 {
@@ -51,6 +52,23 @@ class FunapiClient extends ZApiClient
     {
         $baseUrl = rtrim(config('funapi.base_url'), '/');
         return "{$baseUrl}/instances/{$uid}/token/{$token}/{$action}";
+    }
+
+    /**
+     * Funapi (whatsgo) configures the proxy on the instance-scoped endpoint with
+     * the Client-Token header: a non-empty URL is set via PUT /update-proxy, an
+     * empty/null one clears it via DELETE /proxy (whatsgo has no `enable` flag).
+     */
+    protected function sendProxyConfig(string $uid, string $token, ?string $proxyUrl): ClientResponse
+    {
+        $request = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
+            ->timeout(self::PROXY_CONFIG_TIMEOUT);
+
+        if (empty($proxyUrl)) {
+            return $request->delete($this->buildUrl($uid, $token, 'proxy'));
+        }
+
+        return $request->put($this->buildUrl($uid, $token, 'update-proxy'), ['proxyUrl' => $proxyUrl]);
     }
 
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array

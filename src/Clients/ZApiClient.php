@@ -20,13 +20,17 @@ use Funnelchat\WapiGateway\Resources\Zapi\GroupsResource;
 use Funnelchat\WapiGateway\Resources\Zapi\GroupResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CreateGroupResource;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
+use Funnelchat\WapiGateway\Traits\ConfiguresClientProxy;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\Response as ClientResponse;
 
 class ZApiClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract
 {
     use LogsDeviceRequests;
+    use ConfiguresClientProxy;
 
     protected string $configPrefix = 'zapi';
 
@@ -119,6 +123,25 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         }
 
         return ['uid' => $res->json('id'), 'token' => $res->json('token')];
+    }
+
+    /**
+     * Z-API enables/disables the proxy via the partner integrator endpoint
+     * (`config("{prefix}.proxy_url")`) with the integrator token. `enable` is
+     * derived from whether a non-empty proxy URL was given. Used for both `zapi`
+     * and `zapilite` (resolved through `$this->configPrefix`). The instance uid
+     * is normalized to the bare id (Z-API integrator endpoint rejects the suffix).
+     */
+    protected function sendProxyConfig(string $uid, string $token, ?string $proxyUrl): ClientResponse
+    {
+        $url = str_replace(['UID', 'TOKEN'], [Str::before($uid, '-'), $token], config("$this->configPrefix.proxy_url"));
+
+        return Http::withToken(config("$this->configPrefix.token"))
+            ->timeout(self::PROXY_CONFIG_TIMEOUT)
+            ->put($url, [
+                'proxyUrl' => $proxyUrl ?? '',
+                'enable' => !empty($proxyUrl),
+            ]);
     }
 
     public function status(string $uid, string $token): array
