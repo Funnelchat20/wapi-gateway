@@ -19,11 +19,18 @@ use Illuminate\Http\Client\Response as ClientResponse;
  */
 trait ConfiguresClientProxy
 {
-    /** Max seconds to wait on the upstream proxy-config call. */
-    private const PROXY_CONFIG_TIMEOUT = 10;
+    /**
+     * Max seconds to wait on the upstream proxy-config call.
+     *
+     * `protected` (not `private`) so Client subclasses that override
+     * {@see sendProxyConfig()} — e.g. FunapiClient extends ZApiClient — can read
+     * it; a `private` trait const is scoped to the using class (ZApiClient) and is
+     * invisible to its children, which would fatal with "Undefined constant".
+     */
+    protected const PROXY_CONFIG_TIMEOUT = 10;
 
     /** Fallback error text when the upstream returns no error detail. */
-    private const UNKNOWN_PROXY_ERROR = 'Unknown error';
+    protected const UNKNOWN_PROXY_ERROR = 'Unknown error';
 
     /**
      * Configure (enable) or disable the proxy of an existing instance.
@@ -50,12 +57,12 @@ trait ConfiguresClientProxy
 
             return ['proxy_configured' => true];
         } catch (ConnectionException $e) {
-            $error = $this->redactProxyToken($e->getMessage(), $token);
+            $error = $this->redactProxySecrets($e->getMessage(), $token, $proxyUrl);
             logger()->error('deviceUid #' . $uid . ' configureProxy failed (ConnectionException)', ['uid' => $uid, 'error' => $error]);
 
             return ['proxy_configured' => false, 'error' => $error];
         } catch (\Throwable $e) {
-            $error = $this->redactProxyToken($e->getMessage(), $token);
+            $error = $this->redactProxySecrets($e->getMessage(), $token, $proxyUrl);
             logger()->error('deviceUid #' . $uid . ' configureProxy failed (Throwable)', ['uid' => $uid, 'error' => $error]);
 
             return ['proxy_configured' => false, 'error' => $error];
@@ -67,10 +74,28 @@ trait ConfiguresClientProxy
         return $response->failed() || $response->json('error');
     }
 
-    /** Strip the instance token from upstream error messages before logging/returning it. */
-    private function redactProxyToken(string $message, ?string $token): string
+    /**
+     * Strip secrets from upstream error messages before logging/returning them:
+     * the instance token and any credentials embedded in the proxy URL
+     * (`scheme://user:pass@host` — the user:pass userinfo is replaced).
+     */
+    private function redactProxySecrets(string $message, ?string $token, ?string $proxyUrl): string
     {
-        return empty($token) ? $message : str_replace($token, '***', $message);
+        if (!empty($token)) {
+            $message = str_replace($token, '***', $message);
+        }
+
+        if (!empty($proxyUrl)) {
+            $message = str_replace($proxyUrl, $this->redactUrlUserInfo($proxyUrl), $message);
+        }
+
+        return $message;
+    }
+
+    /** Replace the `user:pass@` userinfo of a proxy URL with `***@`, leaving the host intact. */
+    private function redactUrlUserInfo(string $url): string
+    {
+        return preg_replace('#^([a-z][a-z0-9+.-]*://)[^/@]+@#i', '$1***@', $url);
     }
 
     /**
