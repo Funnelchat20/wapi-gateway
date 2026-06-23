@@ -45,6 +45,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     {
         return ['error' => 'Not supported'];
     }
+    public function configureProxy(string $uid, string $token, ?string $proxyUrl): array { return ['proxy_configured' => false, 'error' => 'Proxy configuration is not supported for this provider']; }
     public function status(string $uid, string $token): array { return ['error' => 'Not supported']; }
     public function qrCode(string $uid, string $token): array { return ['error' => 'Not supported']; }
     public function logout(string $uid, string $token): array { return ['error' => 'Not supported']; }
