@@ -59,6 +59,7 @@ class FunapiClient extends ZApiClient
         $url = $this->buildUrl($uid, $token, 'send-text');
         $payload = ['phone' => $to, 'message' => $text];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
+        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
 
@@ -375,6 +376,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['fileName'])) $params['fileName'] = $options['fileName'];
         if (isset($options['caption'])) $params['caption'] = $options['caption'];
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
+        if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
 
@@ -438,6 +440,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['name'])) $params['name'] = $options['name'];
         if (isset($options['address'])) $params['address'] = $options['address'];
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
+        if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
         $url = $this->buildUrl($uid, $token, 'send-location');
@@ -468,6 +471,7 @@ class FunapiClient extends ZApiClient
             ),
         ];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
+        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
 
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
@@ -496,6 +500,7 @@ class FunapiClient extends ZApiClient
             ],
         ];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
+        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
 
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
@@ -564,6 +569,7 @@ class FunapiClient extends ZApiClient
         ];
         if (isset($options['pollMaxOptions'])) $payload['pollMaxOptions'] = (int) $options['pollMaxOptions'];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
+        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
 
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
@@ -593,6 +599,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['linkDescription'])) $payload['linkDescription'] = $options['linkDescription'];
         if (isset($options['image'])) $payload['image'] = $options['image'];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
+        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
 

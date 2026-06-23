@@ -53,6 +53,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-text'], $this->baseUrl());
         $payload = ['phone' => $to, 'message' => $text];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
+        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
 
@@ -307,6 +308,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['fileName'])) $params['fileName'] = $options['fileName'];
         if (isset($options['caption'])) $params['caption'] = $options['caption'];
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
+        if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
 
@@ -370,6 +372,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['name'])) $params['name'] = $options['name'];
         if (isset($options['address'])) $params['address'] = $options['address'];
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
+        if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-location'], $this->baseUrl());
@@ -488,6 +491,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
+        if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-link'], $this->baseUrl());
         $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(120)->post($url, $params);
         $this->logRequest('sendLink', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $params);
