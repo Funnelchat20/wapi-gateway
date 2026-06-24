@@ -764,8 +764,8 @@ class FunapiClient extends ZApiClient
         $url = $this->buildUrl($uid, $token, 'accept-invite-group');
         $url .= '?' . http_build_query(['url' => $invitationUrl]);
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($url);
-        $this->logRequest('acceptGroupInvitation', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        $this->logRequest('acceptGroupInvitation', $uid, $res->failed() || $res->json('error') || $res->json('success') === false ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
+        if ($res->failed() || $res->json('error') || $res->json('success') === false) return ['error' => $this->formatError($res->json('error', 'error'))];
         return ['success' => true];
     }
 
