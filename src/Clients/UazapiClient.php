@@ -898,7 +898,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return ['error' => 'pinMessage is not supported by UAZAPI provider'];
     }
 
-    public function sendTypingIndicator(string $uid, string $token, string $to): array
+    public function sendTypingIndicator(string $uid, string $token, string $messageId): array
     {
         // UAZAPI does not require a separate typing indicator call.
         return ['success' => true];

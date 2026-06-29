@@ -16,5 +16,11 @@ interface MessagesContract
     public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array;
     public function sendPtv(string $uid, string $token, string $to, string $videoUrl, array $options = []): array;
     public function pinMessage(string $uid, string $token, string $phone, string $messageId, string $duration): array;
-    public function sendTypingIndicator(string $uid, string $token, string $to): array;
+    /**
+     * Display a typing indicator. For Meta Cloud this is attached to the
+     * mark-as-read call for an inbound message, so $messageId is the wamid of a
+     * recent inbound message (within the 24h window). For Z-API/UAZAPI typing is
+     * handled server-side via delayTyping and this is a no-op.
+     */
+    public function sendTypingIndicator(string $uid, string $token, string $messageId): array;
 }

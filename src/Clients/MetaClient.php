@@ -274,23 +274,26 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return ['error' => 'Not supported'];
     }
 
-    public function sendTypingIndicator(string $uid, string $token, string $to): array
+    public function sendTypingIndicator(string $uid, string $token, string $messageId): array
     {
         $startTime = microtime(true);
         $url = $this->graph . $uid . '/messages';
+        // Meta's typing indicator is delivered by marking an inbound message as
+        // read with the typing_indicator flag. It requires the wamid of an
+        // inbound message within the 24h customer-service window — there is no
+        // standalone "send typing to a phone" payload.
         $payload = [
             'messaging_product' => 'whatsapp',
-            'recipient_type' => 'individual',
-            'to' => $to,
-            'type' => 'typing_indicator',
+            'status' => 'read',
+            'message_id' => $messageId,
             'typing_indicator' => ['type' => 'text'],
         ];
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
-            $this->logRequest('sendTypingIndicator', $uid, ['error' => $res->json('error', 'Failed to send typing'), 'phone' => $to], $startTime, $res, $url, $payload);
+            $this->logRequest('sendTypingIndicator', $uid, ['error' => $res->json('error', 'Failed to send typing'), 'message_id' => $messageId], $startTime, $res, $url, $payload);
             return ['error' => $res->json('error', 'Failed to send typing indicator')];
         }
-        $this->logRequest('sendTypingIndicator', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
+        $this->logRequest('sendTypingIndicator', $uid, ['message_id' => $messageId], $startTime, $res, $url, $payload);
         return ['success' => true];
     }
 
