@@ -1129,7 +1129,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return $res->json();
     }
 
-    public function sendTypingIndicator(string $uid, string $token, string $to): array
+    public function sendTypingIndicator(string $uid, string $token, string $messageId): array
     {
         // Z-API handles typing indicators via the delayTyping parameter
         // in send methods. No separate API call needed.
