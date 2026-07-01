@@ -258,6 +258,11 @@ class FunapiClient extends ZApiClient
         return LogOutResource::make($res->json());
     }
 
+    public function extensionToken(string $uid, string $token): array
+    {
+        return ['error' => 'unsupported', 'message' => 'Extension token is not supported for this provider'];
+    }
+
     public function reboot(string $uid, string $token): array
     {
         $startTime = microtime(true);
