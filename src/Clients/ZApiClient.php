@@ -745,6 +745,17 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return ['success' => true];
     }
 
+    public function removeCommunityParticipant(string $uid, string $token, string $id, array $phones): array
+    {
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'remove-participant'], $this->baseUrl());
+        $payload = ['communityId' => $id, 'phones' => $phones];
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->post($url, $payload);
+        $this->logRequest('removeCommunityParticipant', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return ['success' => true];
+    }
+
     public function leaveGroup(string $uid, string $token, string $id): array
     {
         $startTime = microtime(true);

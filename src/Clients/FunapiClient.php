@@ -990,6 +990,17 @@ class FunapiClient extends ZApiClient
         return ['success' => true];
     }
 
+    public function removeCommunityParticipant(string $uid, string $token, string $id, array $phones): array
+    {
+        $startTime = microtime(true);
+        $url = $this->buildUrl($uid, $token, 'remove-participant');
+        $payload = ['communityId' => $id, 'phones' => $phones];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
+        $this->logRequest('removeCommunityParticipant', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return ['success' => true];
+    }
+
     public function leaveGroup(string $uid, string $token, string $id): array
     {
         $startTime = microtime(true);

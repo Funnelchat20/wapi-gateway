@@ -676,6 +676,14 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return ['success' => true];
     }
 
+    public function removeCommunityParticipant(string $uid, string $token, string $id, array $phones): array
+    {
+        $gid = str_contains($id, '@g.us') ? $id : ($id . '@g.us');
+        $res = $this->updateParticipants($token, $gid, 'remove', $phones, $uid);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error') ?? $res->json('message'))];
+        return ['success' => true];
+    }
+
     public function leaveGroup(string $uid, string $token, string $id): array
     {
         $startTime = microtime(true);
