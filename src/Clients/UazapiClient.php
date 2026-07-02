@@ -684,6 +684,11 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return ['success' => true];
     }
 
+    public function deactivateCommunity(string $uid, string $token, string $communityId): array
+    {
+        return ['error' => 'deactivateCommunity is not supported for provider uazapi'];
+    }
+
     public function leaveGroup(string $uid, string $token, string $id): array
     {
         $startTime = microtime(true);

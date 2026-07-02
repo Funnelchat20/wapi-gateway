@@ -1001,6 +1001,16 @@ class FunapiClient extends ZApiClient
         return ['success' => true];
     }
 
+    public function deactivateCommunity(string $uid, string $token, string $communityId): array
+    {
+        $startTime = microtime(true);
+        $url = $this->buildUrl($uid, $token, 'communities/' . $communityId);
+        $res = Http::withHeaders(['accept' => 'application/json', 'Client-Token' => config('funapi.client_token')])->delete($url);
+        $this->logRequest('deactivateCommunity', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return ['success' => true];
+    }
+
     public function leaveGroup(string $uid, string $token, string $id): array
     {
         $startTime = microtime(true);
