@@ -19,6 +19,7 @@ interface GroupsContract
     public function removeAdmins(string $uid, string $token, string $id, array $phones): array;
     public function removeCommunityAdmins(string $uid, string $token, string $id, array $phones): array;
     public function removeCommunityParticipant(string $uid, string $token, string $id, array $phones): array;
+    public function deactivateCommunity(string $uid, string $token, string $communityId): array;
     public function leaveGroup(string $uid, string $token, string $id): array;
     public function communities(string $uid, string $token, array $options = []): array;
     public function communitiesMetadata(string $uid, string $token, string $id): array;
