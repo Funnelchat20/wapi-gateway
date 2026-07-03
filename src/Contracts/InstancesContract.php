@@ -33,6 +33,23 @@ interface InstancesContract
      * Unsupported:  ['error' => 'unsupported', 'message' => 'Extension token is not supported for this provider']
      */
     public function extensionToken(string $uid, string $token): array;
+
+    /**
+     * Request a short-lived session token for the Z-API Connector SDK, the
+     * pre-built modal (window.ZAPIConnector) embedded on the frontend to
+     * connect a WhatsApp session (QR / phone / extension migration) —
+     * fallback when the QR flow is blocked by Meta's new verification layer.
+     *
+     * Implementations must never throw: failures are surfaced via the
+     * returned array. The array uses `error` as a discriminator when the
+     * call fails and omits it on success:
+     *
+     * Success:      ['token' => '<opaque session token>']
+     * Rate-limited: ['error' => 'rate_limited', 'message' => ..., 'status' => 429, 'errorCode' => ...|null]
+     * Upstream err: ['error' => 'upstream_error', 'message' => ..., 'status' => <http_status>, 'errorCode' => ...|null]
+     * Unsupported:  ['error' => 'unsupported', 'message' => 'SDK connector token is not supported for this provider']
+     */
+    public function sdkConnectorToken(string $uid, string $token): array;
     public function logout(string $uid, string $token): array;
     public function reboot(string $uid, string $token): array;
     public function me(string $uid, string $token): array;
