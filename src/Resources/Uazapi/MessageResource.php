@@ -13,6 +13,9 @@ class MessageResource
             "sent" => !empty($messageId),
             "message" => "",
             "id" => $messageId,
+            // Provider-agnostic queue id. UAZAPI has no queue-delete concept
+            // (deleteQueueMessage is a no-op), so it's always null here.
+            "queueId" => $data['queueId'] ?? null,
             "queueNumber" => ""
         ];
     }

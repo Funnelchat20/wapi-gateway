@@ -452,7 +452,9 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error', 'error'))];
         }
-        return $res->json();
+        // Expose the provider-agnostic queue id (Z-API `zaapId`) alongside the raw
+        // response so callers can dequeue this message via deleteQueueMessage().
+        return array_merge($res->json(), ['queueId' => $res->json('zaapId')]);
     }
 
     public function sendOptionList(string $uid, string $token, string $to, string $message, string $buttonLabel, array $optionsList, array $extra = []): array
@@ -501,7 +503,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error', 'error'))];
         }
-        return $res->json();
+        return array_merge($res->json(), ['queueId' => $res->json('zaapId')]);
     }
 
     public function sendLink(string $uid, string $token, string $to, string $message, string $linkUrl, array $options = []): array
@@ -521,7 +523,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if ($res->failed() || $res->json('error')) {
             return ['error' => $this->formatError($res->json('error', 'error'))];
         }
-        return $res->json();
+        return array_merge($res->json(), ['queueId' => $res->json('zaapId')]);
     }
 
     public function sendEvent(string $uid, string $token, string $toGroupPhone, array $event, array $options = []): array
@@ -532,7 +534,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(60)->post($url, $params);
         $this->logRequest('sendEvent', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $params);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return $res->json();
+        return array_merge($res->json(), ['queueId' => $res->json('zaapId')]);
     }
 
     public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
@@ -807,7 +809,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->post($url, $payload);
         $this->logRequest('sendContact', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return $res->json();
+        return array_merge($res->json(), ['queueId' => $res->json('zaapId')]);
     }
 
     public function communities(string $uid, string $token, array $options = []): array

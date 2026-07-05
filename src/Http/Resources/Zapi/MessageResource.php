@@ -12,6 +12,8 @@ class MessageResource extends JsonResource
             'sent' => isset($this['messageId']),
             'message' => '',
             'id' => $this['messageId'] ?? '',
+            // Provider-agnostic queue id (Z-API returns it as `zaapId`).
+            'queueId' => $this['zaapId'] ?? null,
             'queueNumber' => ''
         ];
     }
