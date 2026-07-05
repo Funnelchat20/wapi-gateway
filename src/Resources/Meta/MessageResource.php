@@ -10,6 +10,8 @@ class MessageResource
             'sent' => isset($data['messages'][0]['id']),
             'message' => '',
             'id' => $data['messages'][0]['id'] ?? '',
+            // Provider-agnostic queue id. Meta Cloud API has no send queue.
+            'queueId' => null,
             'queueNumber' => '',
         ];
     }
