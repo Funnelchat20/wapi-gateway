@@ -266,7 +266,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'sdk-connector-token'], $this->baseUrl());
         $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
             ->timeout(config("$this->configPrefix.timeout", 30))
-            ->post($url);
+            ->get($url);
 
         $hasError = $res->failed() || $res->json('error');
         $this->logRequest(
