@@ -1002,8 +1002,8 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     {
         $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'update-newsletter-name'], $this->baseUrl());
-        $payload = ['id' => $id, 'name' => $name];
-        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 120))->put($url, $payload);
+        $payload = ['id' => str_ends_with($id, '@newsletter') ? $id : $id . '@newsletter', 'name' => $name];
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 120))->post($url, $payload);
         $this->logRequest('updateNewsletterName', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
@@ -1013,8 +1013,8 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     {
         $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'update-newsletter-description'], $this->baseUrl());
-        $payload = ['id' => $id, 'description' => $description];
-        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 120))->put($url, $payload);
+        $payload = ['id' => str_ends_with($id, '@newsletter') ? $id : $id . '@newsletter', 'description' => $description];
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 120))->post($url, $payload);
         $this->logRequest('updateNewsletterDescription', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
@@ -1024,8 +1024,8 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     {
         $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'update-newsletter-picture'], $this->baseUrl());
-        $payload = ['id' => $id, 'picture' => $photoUrl];
-        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 120))->put($url, $payload);
+        $payload = ['id' => str_ends_with($id, '@newsletter') ? $id : $id . '@newsletter', 'pictureUrl' => $photoUrl];
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 120))->post($url, $payload);
         $this->logRequest('updateNewsletterPicture', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
