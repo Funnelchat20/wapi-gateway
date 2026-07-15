@@ -122,8 +122,9 @@ $response = WapiGateway::messages($provider)->sendText($uid, $token, $phone, $ms
   explícito en options tiene precedencia sobre `typing`.
 - **Meta (WhatsApp Cloud)**: si hay `lastInboundId`, el SDK dispara el indicador
   (`status: read` + `typing_indicator`) inmediatamente antes del send, best-effort.
-  Sin `lastInboundId` (o fuera de la ventana de 24h) envía normal; **el typing nunca
-  falla ni demora el send**. Si el indicador falla, el resultado incluye
+  Sin `lastInboundId` (o fuera de la ventana de 24h) envía normal. **El typing nunca
+  falla el send**: el indicador corre acotado por un timeout propio de 5s (peor caso
+  agrega esa espera antes del send) y si falla, el resultado incluye
   `'typing_result' => ['error' => ...]` para loguearlo.
 
 Para orquestar la espera en providers que no la resuelven server-side, branchear una

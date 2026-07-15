@@ -3,7 +3,8 @@
 namespace Funnelchat\WapiGateway\Contracts;
 
 /**
- * Send methods accept a provider-agnostic `typing` option (opt-in):
+ * sendText/sendFile/sendButtons/sendOptionList accept a provider-agnostic
+ * `typing` option (opt-in; other send methods ignore it):
  *
  *     'typing' => [
  *         'lastInboundId' => $wamid, // wamid of the contact's last inbound message (nullable)

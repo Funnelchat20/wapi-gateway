@@ -26,8 +26,10 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
     {
-        $startTime = microtime(true);
+        // Fired before $startTime so the send's logged duration excludes the
+        // indicator round-trip (the indicator logs its own duration).
         $typingResult = $this->fireTypingIndicator($uid, $token, $options);
+        $startTime = microtime(true);
         $url = $this->graph . $uid . '/messages';
         $payload = [
             'messaging_product' => 'whatsapp',
@@ -65,11 +67,11 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
-        $startTime = microtime(true);
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $type = $this->mapType($ext);
         if ($type === 'invalid') return ['error' => 'Invalid file extension'];
         $typingResult = $this->fireTypingIndicator($uid, $token, $options);
+        $startTime = microtime(true);
         $media = isset($options['mediaId']) ? ['id' => $options['mediaId']] : ['link' => $fileUrl];
         $payload = ['messaging_product' => 'whatsapp', 'to' => $to, 'type' => $type, $type => $media];
         if (isset($options['fileName']) && $type === 'document') $payload[$type]['filename'] = $options['fileName'];
@@ -102,8 +104,17 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function sendButtons(string $uid, string $token, string $to, string $message, array $buttons, array $options = []): array
     {
-        $startTime = microtime(true);
+        // Validate the header media before firing the typing indicator: the
+        // indicator marks the inbound as read, a side effect we must not emit
+        // for a send that will never happen.
+        $headerType = null;
+        if (isset($options['fileUrl'])) {
+            $ext = strtolower(pathinfo($options['fileUrl'], PATHINFO_EXTENSION));
+            $headerType = $this->mapType($ext);
+            if ($headerType === 'invalid') return ['error' => 'Invalid file extension'];
+        }
         $typingResult = $this->fireTypingIndicator($uid, $token, $options);
+        $startTime = microtime(true);
         $payload = [
             'messaging_product' => 'whatsapp',
             'to' => $to,
@@ -122,11 +133,8 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 ]
             ]
         ];
-        if (isset($options['fileUrl'])) {
-            $ext = strtolower(pathinfo($options['fileUrl'], PATHINFO_EXTENSION));
-            $mediaType = $this->mapType($ext);
-            if ($mediaType === 'invalid') return ['error' => 'Invalid file extension'];
-            $payload['interactive']['header'] = ['type' => $mediaType, $mediaType => ['link' => $options['fileUrl']]];
+        if ($headerType !== null) {
+            $payload['interactive']['header'] = ['type' => $headerType, $headerType => ['link' => $options['fileUrl']]];
         }
         $url = $this->graph . $uid . '/messages';
         $res = Http::withToken($token)->post($url, $payload);
@@ -163,8 +171,8 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function sendOptionList(string $uid, string $token, string $to, string $message, string $buttonLabel, array $optionsList, array $extra = []): array
     {
-        $startTime = microtime(true);
         $typingResult = $this->fireTypingIndicator($uid, $token, $extra);
+        $startTime = microtime(true);
         // Support both formats: with sections or flat array
         // If first element has 'rows' key, it's already in sections format
         // Otherwise, wrap it in a section
@@ -294,9 +302,16 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'message_id' => $messageId,
             'typing_indicator' => ['type' => 'text'],
         ];
-        // Short timeout: the indicator is best-effort and must never hold up
-        // the send that follows it.
-        $res = Http::withToken($token)->timeout(self::TYPING_INDICATOR_TIMEOUT)->post($url, $payload);
+        // Short timeout: the indicator is best-effort and must not hold up a
+        // send that follows it for long. Connection failures are returned as
+        // ['error' => ...] (never thrown) to honor this method's contract for
+        // direct callers too.
+        try {
+            $res = Http::withToken($token)->timeout(self::TYPING_INDICATOR_TIMEOUT)->post($url, $payload);
+        } catch (\Throwable $e) {
+            $this->logRequest('sendTypingIndicator', $uid, ['error' => $e->getMessage(), 'message_id' => $messageId], $startTime, null, $url, $payload);
+            return ['error' => $e->getMessage()];
+        }
         if ($res->failed()) {
             $this->logRequest('sendTypingIndicator', $uid, ['error' => $res->json('error', 'Failed to send typing'), 'message_id' => $messageId], $startTime, $res, $url, $payload);
             return ['error' => $res->json('error', 'Failed to send typing indicator')];
@@ -322,7 +337,9 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     private function fireTypingIndicator(string $uid, string $token, array $options): ?array
     {
         $lastInboundId = $options['typing']['lastInboundId'] ?? null;
-        if (empty($lastInboundId)) return null;
+        // Only a non-empty string/int is a usable wamid; anything else (null,
+        // arrays, bools) means "no indicator", never an error.
+        if ((!is_string($lastInboundId) && !is_int($lastInboundId)) || $lastInboundId === '') return null;
         try {
             return $this->sendTypingIndicator($uid, $token, (string) $lastInboundId);
         } catch (\Throwable $e) {
