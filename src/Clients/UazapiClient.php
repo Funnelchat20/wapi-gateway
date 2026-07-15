@@ -229,6 +229,16 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return LogOutResource::make($res->json());
     }
 
+    public function extensionToken(string $uid, string $token): array
+    {
+        return ['error' => 'unsupported', 'message' => 'Extension token is not supported for this provider'];
+    }
+
+    public function sdkConnectorToken(string $uid, string $token): array
+    {
+        return ['error' => 'unsupported', 'message' => 'SDK connector token is not supported for this provider'];
+    }
+
     public function reboot(string $uid, string $token): array
     {
         $startTime = microtime(true);
