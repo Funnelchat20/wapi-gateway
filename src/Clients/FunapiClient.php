@@ -28,6 +28,16 @@ class FunapiClient extends ZApiClient
 
     protected string $configPrefix = 'funapi';
 
+    // businessProfile() is intentionally NOT overridden here: FunApi/whatsgo
+    // mirrors the Z-API REST surface 1:1 (same endpoint paths under a
+    // different base_url — see `groups()`, `me()`, `status()` above, all
+    // pointed at FUNAPI_BASE_URL via the inherited `configPrefix`), so
+    // ZApiClient::businessProfile() already resolves the correct
+    // `{FUNAPI_BASE_URL}/instances/{uid}/token/{token}/business/profile`
+    // URL with the `funapi.client_token`. It degrades gracefully (empty
+    // BusinessProfileResource defaults, never an exception) if the
+    // self-hosted whatsgo backend does not implement this endpoint.
+
     protected function getProviderName(): string
     {
         return 'funapi';

@@ -10,6 +10,7 @@ use Funnelchat\WapiGateway\Contracts\QueueContract;
 use Funnelchat\WapiGateway\Resources\Uazapi\MessageResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\QrCodeResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\MeResource;
+use Funnelchat\WapiGateway\Resources\Zapi\BusinessProfileResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\LogOutResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\RebootResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\CheckPhoneResource;
@@ -251,6 +252,16 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         $this->logRequest('me', $uid, $res->failed() ? ['error' => $res->json('message') ?? $res->json('error') ?? 'error'] : [], $startTime, $res, $url);
         if ($res->failed()) return ['error' => $this->formatError($res->json('message') ?? $res->json('error') ?? 'error')];
         return MeResource::make($res->json());
+    }
+
+    /**
+     * UAZAPI has no equivalent Business-profile endpoint (it is a
+     * whatsmeow-based provider, not the Z-API commercial product). Always
+     * returns the empty-defaults shape — never an error/exception.
+     */
+    public function businessProfile(string $uid, string $token): array
+    {
+        return BusinessProfileResource::make([]);
     }
 
     public function checkPhone(string $uid, string $token, string $phone): array
