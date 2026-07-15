@@ -9,6 +9,7 @@ use Funnelchat\WapiGateway\Contracts\TemplatesContract;
 use Funnelchat\WapiGateway\Helpers\WhatsAppCloudHelper;
 use Funnelchat\WapiGateway\Jobs\StoreDeviceLogJob;
 use Funnelchat\WapiGateway\Resources\Meta\MessageResource;
+use Funnelchat\WapiGateway\Resources\Zapi\BusinessProfileResource;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Illuminate\Support\Facades\Http;
 
@@ -51,6 +52,17 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     public function logout(string $uid, string $token): array { return ['error' => 'Not supported']; }
     public function reboot(string $uid, string $token): array { return ['error' => 'Not supported']; }
     public function me(string $uid, string $token): array { return ['error' => 'Not supported']; }
+
+    /**
+     * Not applicable to Meta/WhatsApp Cloud API — business profile info is
+     * managed through Meta's own WABA settings, not this gateway. Returns
+     * the empty-defaults shape (never an exception) for contract parity.
+     */
+    public function businessProfile(string $uid, string $token): array
+    {
+        return BusinessProfileResource::make([]);
+    }
+
     public function checkPhone(string $uid, string $token, string $phone): array { return ['error' => 'Not supported']; }
     public function checkPhoneWhatsapp(string $uid, string $token, string $phone): array { return ['error' => 'Not supported']; }
     public function checkPhonesBatch(string $uid, string $token, array $phones): array { return ['error' => 'Not supported']; }

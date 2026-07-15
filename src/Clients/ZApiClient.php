@@ -10,6 +10,7 @@ use Funnelchat\WapiGateway\Contracts\QueueContract;
 use Funnelchat\WapiGateway\Resources\Zapi\MessageResource;
 use Funnelchat\WapiGateway\Resources\Zapi\QrCodeResource;
 use Funnelchat\WapiGateway\Resources\Zapi\MeResource;
+use Funnelchat\WapiGateway\Resources\Zapi\BusinessProfileResource;
 use Funnelchat\WapiGateway\Resources\Zapi\LogOutResource;
 use Funnelchat\WapiGateway\Resources\Zapi\RebootResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CheckPhoneResource;
@@ -237,6 +238,79 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $this->logRequest('me', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return MeResource::make($res->json());
+    }
+
+    /**
+     * GET .../business/profile — Z-API's Business profile endpoint, separate
+     * from `/device` (used by `me()`). Never throws: a failed request, an
+     * `error` payload, a connection failure (DNS/timeout/refused), or a
+     * non-business account (empty/partial response) all resolve to
+     * `BusinessProfileResource::make([])` (empty defaults).
+     */
+    public function businessProfile(string $uid, string $token): array
+    {
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'business/profile'], $this->baseUrl());
+
+        try {
+            $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
+                ->timeout(config("$this->configPrefix.timeout", 30))
+                ->get($url);
+        } catch (ConnectionException $e) {
+            // DNS/timeout/connection-refused: no HTTP response object exists,
+            // so there is nothing to log status/duration from beyond the error.
+            $this->logRequest('businessProfile', $uid, ['error' => $this->formatError($e->getMessage())], $startTime, null, $url);
+            return BusinessProfileResource::make([]);
+        }
+
+        // The business/profile payload carries `email`/`address` (business
+        // PII) that the shared `redactSensitiveKeys()` allowlist does not
+        // cover (it only scrubs auth secrets like tokens/passwords). Rather
+        // than widen that shared allowlist — which would also affect every
+        // other client method's device log — suppress the response body for
+        // THIS request only via `withoutLoggedBody()`. Status code, success
+        // flag and duration (non-PII) are still recorded normally.
+        $this->logRequest(
+            'businessProfile',
+            $uid,
+            $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [],
+            $startTime,
+            $this->withoutLoggedBody($res),
+            $url
+        );
+
+        if ($res->failed() || $res->json('error')) return BusinessProfileResource::make([]);
+        return BusinessProfileResource::make($res->json() ?? []);
+    }
+
+    /**
+     * Wraps a response so `LogsDeviceRequests::logRequest()` still receives
+     * status/duration metadata for the device log, but `json()` — the value
+     * persisted as the log's response body when `wapi-gateway.logging_enabled`
+     * is on — always resolves to null. See `businessProfile()` for why.
+     */
+    private function withoutLoggedBody(ClientResponse $response): object
+    {
+        return new class($response) {
+            public function __construct(private ClientResponse $response)
+            {
+            }
+
+            public function status(): int
+            {
+                return $this->response->status();
+            }
+
+            public function successful(): bool
+            {
+                return $this->response->successful();
+            }
+
+            public function json($key = null, $default = null)
+            {
+                return null;
+            }
+        };
     }
 
     public function checkPhone(string $uid, string $token, string $phone): array
