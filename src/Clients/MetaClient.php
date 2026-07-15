@@ -22,9 +22,12 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     }
     private string $graph = 'https://graph.facebook.com/v20.0/';
 
+    private const TYPING_INDICATOR_TIMEOUT = 5;
+
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
     {
         $startTime = microtime(true);
+        $typingResult = $this->fireTypingIndicator($uid, $token, $options);
         $url = $this->graph . $uid . '/messages';
         $payload = [
             'messaging_product' => 'whatsapp',
@@ -35,10 +38,10 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendText', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
-            return ['error' => $res->json('error', 'Failed to send')];
+            return $this->withTypingResult(['error' => $res->json('error', 'Failed to send')], $typingResult);
         }
         $this->logRequest('sendText', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
-        return MessageResource::make($res->json());
+        return $this->withTypingResult(MessageResource::make($res->json()), $typingResult);
     }
 
     public function create(int $userId, int $deviceId): array
@@ -66,6 +69,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $type = $this->mapType($ext);
         if ($type === 'invalid') return ['error' => 'Invalid file extension'];
+        $typingResult = $this->fireTypingIndicator($uid, $token, $options);
         $media = isset($options['mediaId']) ? ['id' => $options['mediaId']] : ['link' => $fileUrl];
         $payload = ['messaging_product' => 'whatsapp', 'to' => $to, 'type' => $type, $type => $media];
         if (isset($options['fileName']) && $type === 'document') $payload[$type]['filename'] = $options['fileName'];
@@ -74,10 +78,10 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendFile', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to, 'file_type' => $ext], $startTime, $res, $url, $payload);
-            return ['error' => $res->json('error', 'Failed to send')];
+            return $this->withTypingResult(['error' => $res->json('error', 'Failed to send')], $typingResult);
         }
         $this->logRequest('sendFile', $uid, ['phone' => $to, 'file_type' => $ext], $startTime, $res, $url, $payload);
-        return MessageResource::make($res->json());
+        return $this->withTypingResult(MessageResource::make($res->json()), $typingResult);
     }
 
     public function sendLocation(string $uid, string $token, string $to, float $lat, float $lng, array $options = []): array
@@ -99,6 +103,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     public function sendButtons(string $uid, string $token, string $to, string $message, array $buttons, array $options = []): array
     {
         $startTime = microtime(true);
+        $typingResult = $this->fireTypingIndicator($uid, $token, $options);
         $payload = [
             'messaging_product' => 'whatsapp',
             'to' => $to,
@@ -127,10 +132,10 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendButtons', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
-            return ['error' => $res->json('error', 'Failed to send')];
+            return $this->withTypingResult(['error' => $res->json('error', 'Failed to send')], $typingResult);
         }
         $this->logRequest('sendButtons', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
-        return MessageResource::make($res->json());
+        return $this->withTypingResult(MessageResource::make($res->json()), $typingResult);
     }
 
     public function sendButtonLink(string $uid, string $token, string $to, string $message, string $url, string $label, array $options = []): array
@@ -159,6 +164,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     public function sendOptionList(string $uid, string $token, string $to, string $message, string $buttonLabel, array $optionsList, array $extra = []): array
     {
         $startTime = microtime(true);
+        $typingResult = $this->fireTypingIndicator($uid, $token, $extra);
         // Support both formats: with sections or flat array
         // If first element has 'rows' key, it's already in sections format
         // Otherwise, wrap it in a section
@@ -201,10 +207,10 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendOptionList', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
-            return ['error' => $res->json('error', 'Failed to send')];
+            return $this->withTypingResult(['error' => $res->json('error', 'Failed to send')], $typingResult);
         }
         $this->logRequest('sendOptionList', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
-        return MessageResource::make($res->json());
+        return $this->withTypingResult(MessageResource::make($res->json()), $typingResult);
     }
 
     public function sendPoll(string $uid, string $token, string $to, string $message, array $pollOptions, array $options = []): array
@@ -288,13 +294,50 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'message_id' => $messageId,
             'typing_indicator' => ['type' => 'text'],
         ];
-        $res = Http::withToken($token)->post($url, $payload);
+        // Short timeout: the indicator is best-effort and must never hold up
+        // the send that follows it.
+        $res = Http::withToken($token)->timeout(self::TYPING_INDICATOR_TIMEOUT)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendTypingIndicator', $uid, ['error' => $res->json('error', 'Failed to send typing'), 'message_id' => $messageId], $startTime, $res, $url, $payload);
             return ['error' => $res->json('error', 'Failed to send typing indicator')];
         }
         $this->logRequest('sendTypingIndicator', $uid, ['message_id' => $messageId], $startTime, $res, $url, $payload);
         return ['success' => true];
+    }
+
+    public function handlesTypingDelayServerSide(): bool
+    {
+        // Meta discards the indicator as soon as the message arrives, so making
+        // it visible requires the caller to delay the send itself (e.g. a
+        // delayed job); the SDK only fires the indicator alongside the send.
+        return false;
+    }
+
+    /**
+     * Fire the typing indicator right before a send when the `typing` option
+     * carries the wamid of a recent inbound. Best-effort: returns null when
+     * there is nothing to do, and an ['error' => ...] result (never throws)
+     * when the indicator fails, so the send always proceeds.
+     */
+    private function fireTypingIndicator(string $uid, string $token, array $options): ?array
+    {
+        $lastInboundId = $options['typing']['lastInboundId'] ?? null;
+        if (empty($lastInboundId)) return null;
+        try {
+            return $this->sendTypingIndicator($uid, $token, (string) $lastInboundId);
+        } catch (\Throwable $e) {
+            return ['error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Attach the typing indicator outcome to a send result so failures are
+     * observable (`typing_result`) without ever affecting the send itself.
+     */
+    private function withTypingResult(array $result, ?array $typingResult): array
+    {
+        if (isset($typingResult['error'])) $result['typing_result'] = $typingResult;
+        return $result;
     }
 
     public function addContacts(string $uid, string $token, array $contacts): array

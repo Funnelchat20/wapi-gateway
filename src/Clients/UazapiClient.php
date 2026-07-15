@@ -917,6 +917,13 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return ['success' => true];
     }
 
+    public function handlesTypingDelayServerSide(): bool
+    {
+        // UAZAPI's `delay` param shows typing server-side. The provider is
+        // deprecated, so the `typing` send option is not wired into its sends.
+        return true;
+    }
+
     public function addContacts(string $uid, string $token, array $contacts): array
     {
         return ['error' => 'addContacts is not supported by UAZAPI provider'];

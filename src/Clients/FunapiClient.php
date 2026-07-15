@@ -80,6 +80,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
+        $payload = $this->applyTypingOption($payload, $options);
 
         $request = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
             ->timeout(config('funapi.timeout', 120));
@@ -397,6 +398,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
+        $params = $this->applyTypingOption($params, $options);
 
         // Automatically enable async processing for video files (improves performance and prevents timeouts)
         // Can be explicitly disabled by setting $options['async'] = false
@@ -491,6 +493,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
         if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+        $payload = $this->applyTypingOption($payload, $options);
 
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
             ->timeout(config('funapi.timeout', 29))
@@ -561,6 +564,7 @@ class FunapiClient extends ZApiClient
             ],
         ];
         if (isset($extra['delayMessage'])) $payload['delayMessage'] = (int) $extra['delayMessage'];
+        $payload = $this->applyTypingOption($payload, $extra);
 
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
             ->timeout(config('funapi.timeout', 29))

@@ -60,6 +60,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
+        $payload = $this->applyTypingOption($payload, $options);
 
         $request = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
             ->timeout(config("$this->configPrefix.timeout", 120));
@@ -334,6 +335,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
+        $params = $this->applyTypingOption($params, $options);
 
         // Automatically enable async processing for video files (improves performance and prevents timeouts)
         // Can be explicitly disabled by setting $options['async'] = false
@@ -412,6 +414,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $startTime = microtime(true);
         $params = ['phone' => $to, 'message' => $message, 'buttonList' => ['buttons' => $buttons]];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
+        $params = $this->applyTypingOption($params, $options);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-button-list'], $this->baseUrl());
 
         $request = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
@@ -462,6 +465,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $startTime = microtime(true);
         $params = ['phone' => $to, 'message' => $message, 'optionList' => ['options' => $optionsList, 'buttonLabel' => $buttonLabel]];
         if (isset($extra['delayMessage'])) $params['delayMessage'] = (int) $extra['delayMessage'];
+        $params = $this->applyTypingOption($params, $extra);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-option-list'], $this->baseUrl());
         $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(120)->post($url, $params);
         $this->logRequest('sendOptionList', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $params);
@@ -1157,6 +1161,23 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         // Z-API handles typing indicators via the delayTyping parameter
         // in send methods. No separate API call needed.
         return ['success' => true];
+    }
+
+    public function handlesTypingDelayServerSide(): bool
+    {
+        return true;
+    }
+
+    /**
+     * Translate the provider-agnostic `typing` option into Z-API's server-side
+     * `delayTyping` param (seconds). An explicit `delayTyping` option wins.
+     */
+    protected function applyTypingOption(array $params, array $options): array
+    {
+        if (!isset($params['delayTyping']) && isset($options['typing']['delaySeconds'])) {
+            $params['delayTyping'] = (int) $options['typing']['delaySeconds'];
+        }
+        return $params;
     }
 
     public function addContacts(string $uid, string $token, array $contacts): array
