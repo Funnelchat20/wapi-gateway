@@ -2,6 +2,20 @@
 
 namespace Funnelchat\WapiGateway\Contracts;
 
+/**
+ * sendText/sendFile/sendButtons/sendOptionList accept a provider-agnostic
+ * `typing` option (opt-in; other send methods ignore it):
+ *
+ *     'typing' => [
+ *         'lastInboundId' => $wamid, // wamid of the contact's last inbound message (nullable)
+ *         'delaySeconds'  => 3,      // desired typing duration
+ *     ]
+ *
+ * Providers that handle the delay server-side (see handlesTypingDelayServerSide())
+ * translate it to their native delayTyping param. Meta fires the typing indicator
+ * right before the send when `lastInboundId` is present — best-effort: an indicator
+ * failure never fails the send, it is reported under `typing_result` in the result.
+ */
 interface MessagesContract
 {
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array;
@@ -23,4 +37,13 @@ interface MessagesContract
      * handled server-side via delayTyping and this is a no-op.
      */
     public function sendTypingIndicator(string $uid, string $token, string $messageId): array;
+    /**
+     * Whether the provider renders the typing indicator server-side when a send
+     * carries the `typing` option (the provider holds the message and shows
+     * "typing…" for the requested duration — a single call, no blocking).
+     * When false (Meta), the SDK only fires the indicator alongside the send;
+     * the temporal orchestration (delaying the send so the indicator is visible)
+     * is the caller's responsibility, e.g. via its own delayed job.
+     */
+    public function handlesTypingDelayServerSide(): bool;
 }

@@ -104,6 +104,40 @@ $res = WapiGateway::instances(ProviderEnum::ZApi)->configureProxy($uid, $token, 
 // zapi/zapilite requieren la clave config `proxy_url` (endpoint integrator configure-proxy).
 ```
 
+### Typing "escribiendo…" provider-agnóstico
+
+`sendText`/`sendFile`/`sendButtons`/`sendOptionList` aceptan la opción `typing` (opt-in):
+
+```php
+$response = WapiGateway::messages($provider)->sendText($uid, $token, $phone, $msg, [
+    'typing' => [
+        'lastInboundId' => $wamid,   // wamid del último inbound del contacto (puede ser null)
+        'delaySeconds'  => 3,        // duración deseada del typing
+    ],
+]);
+```
+
+- **Z-API / Funapi / Z-API Lite**: se traduce a `delayTyping` — el provider retiene el
+  mensaje server-side y muestra typing. Un solo request, cero bloqueo. Un `delayTyping`
+  explícito en options tiene precedencia sobre `typing`.
+- **Meta (WhatsApp Cloud)**: si hay `lastInboundId`, el SDK dispara el indicador
+  (`status: read` + `typing_indicator`) inmediatamente antes del send, best-effort.
+  Sin `lastInboundId` (o fuera de la ventana de 24h) envía normal. **El typing nunca
+  falla el send**: el indicador corre acotado por un timeout propio de 5s (peor caso
+  agrega esa espera antes del send) y si falla, el resultado incluye
+  `'typing_result' => ['error' => ...]` para loguearlo.
+
+Para orquestar la espera en providers que no la resuelven server-side, branchear una
+sola vez sobre la capability (no sobre identidad de provider):
+
+```php
+if (WapiGateway::messages($provider)->handlesTypingDelayServerSide()) {
+    // Un solo call con la opción 'typing'.
+} else {
+    // Meta: sendTypingIndicator($uid, $token, $wamid) + job diferido propio para el send.
+}
+```
+
 ## Compatibilidad de Proveedores
 
 ### 📨 Mensajería
