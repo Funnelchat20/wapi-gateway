@@ -9,6 +9,8 @@ use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\QueueContract;
 use Funnelchat\WapiGateway\Resources\Zapi\MessageResource;
 use Funnelchat\WapiGateway\Resources\Zapi\QrCodeResource;
+use Funnelchat\WapiGateway\Resources\Zapi\ExtensionTokenResource;
+use Funnelchat\WapiGateway\Resources\Zapi\SdkConnectorTokenResource;
 use Funnelchat\WapiGateway\Resources\Zapi\MeResource;
 use Funnelchat\WapiGateway\Resources\Zapi\BusinessProfileResource;
 use Funnelchat\WapiGateway\Resources\Zapi\LogOutResource;
@@ -219,6 +221,84 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $this->logRequest('logout', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return LogOutResource::make($res->json());
+    }
+
+    public function extensionToken(string $uid, string $token): array
+    {
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'extension-token'], $this->baseUrl());
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
+            ->timeout(config("$this->configPrefix.timeout", 30))
+            ->get($url);
+
+        $hasError = $res->failed() || $res->json('error');
+        $this->logRequest(
+            'extensionToken',
+            $uid,
+            $hasError ? ['error' => $res->json('error', 'error'), 'status' => $res->status()] : [],
+            $startTime,
+            $res,
+            $url,
+        );
+
+        if ($res->status() === 429) {
+            return [
+                'error' => 'rate_limited',
+                'message' => $this->formatError($res->json('error') ?? $res->json('message') ?? 'Rate limit exceeded'),
+                'status' => 429,
+                'errorCode' => $res->json('errorCode'),
+            ];
+        }
+
+        if ($hasError) {
+            return [
+                'error' => 'upstream_error',
+                'message' => $this->formatError($res->json('error') ?? $res->json('message') ?? 'Upstream error'),
+                'status' => $res->status(),
+                'errorCode' => $res->json('errorCode'),
+            ];
+        }
+
+        return ExtensionTokenResource::make($res->json());
+    }
+
+    public function sdkConnectorToken(string $uid, string $token): array
+    {
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'sdk-connector-token'], $this->baseUrl());
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
+            ->timeout(config("$this->configPrefix.timeout", 30))
+            ->get($url);
+
+        $hasError = $res->failed() || $res->json('error');
+        $this->logRequest(
+            'sdkConnectorToken',
+            $uid,
+            $hasError ? ['error' => $res->json('error', 'error'), 'status' => $res->status()] : [],
+            $startTime,
+            $res,
+            $url,
+        );
+
+        if ($res->status() === 429) {
+            return [
+                'error' => 'rate_limited',
+                'message' => $this->formatError($res->json('error') ?? $res->json('message') ?? 'Rate limit exceeded'),
+                'status' => 429,
+                'errorCode' => $res->json('errorCode'),
+            ];
+        }
+
+        if ($hasError) {
+            return [
+                'error' => 'upstream_error',
+                'message' => $this->formatError($res->json('error') ?? $res->json('message') ?? 'Upstream error'),
+                'status' => $res->status(),
+                'errorCode' => $res->json('errorCode'),
+            ];
+        }
+
+        return SdkConnectorTokenResource::make($res->json());
     }
 
     public function reboot(string $uid, string $token): array
