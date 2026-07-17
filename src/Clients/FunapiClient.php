@@ -125,7 +125,7 @@ class FunapiClient extends ZApiClient
         return MessageResource::make($res->json());
     }
 
-    public function create(int $userId, int $deviceId): array
+    public function create(int $userId, int $deviceId, ?string $countryCode = null): array
     {
         $startTime = microtime(true);
         $name = 'U-' . $userId . ' D-' . $deviceId;
@@ -136,6 +136,13 @@ class FunapiClient extends ZApiClient
             'name' => $name,
             'sessionName' => 'Funnelchat',
         ];
+
+        // Optional country hint: FunApi assigns a region-matched proxy at connect
+        // time from it (ISO alpha-2). Omitted when null/empty so FunApi derives it
+        // from the number/JID, else its configured default. Normalized to uppercase.
+        if ($countryCode !== null && $countryCode !== '') {
+            $payload['countryCode'] = strtoupper($countryCode);
+        }
 
         // Only configure webhooks if WEBHOOK_BASE_URL is set.
         // FunAPI shares the Z-API-compatible webhook receiver convention with

@@ -47,7 +47,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return $this->withTypingResult(MessageResource::make($res->json()), $typingResult);
     }
 
-    public function create(int $userId, int $deviceId): array
+    public function create(int $userId, int $deviceId, ?string $countryCode = null): array
     {
         return ['error' => 'Not supported'];
     }

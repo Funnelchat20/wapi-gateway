@@ -98,7 +98,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return MessageResource::make($res->json());
     }
 
-    public function create(int $userId, int $deviceId): array
+    public function create(int $userId, int $deviceId, ?string $countryCode = null): array
     {
         $startTime = microtime(true);
         $name = 'U-' . $userId . ' D-' . $deviceId;
