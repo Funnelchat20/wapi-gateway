@@ -4,7 +4,12 @@ namespace Funnelchat\WapiGateway\Contracts;
 
 interface InstancesContract
 {
-    public function create(int $userId, int $deviceId): array;
+    /**
+     * Create a provider instance for a device. $countryCode is an optional
+     * ISO alpha-2 hint (e.g. "CO"); FunApi uses it to assign a region-matched
+     * proxy at connect time. Other providers ignore it.
+     */
+    public function create(int $userId, int $deviceId, ?string $countryCode = null): array;
 
     /**
      * Configure (enable) or disable the proxy of an existing instance through the

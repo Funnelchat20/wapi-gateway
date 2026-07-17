@@ -55,7 +55,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return MessageResource::make($res->json());
     }
 
-    public function create(int $userId, int $deviceId): array
+    public function create(int $userId, int $deviceId, ?string $countryCode = null): array
     {
         $startTime = microtime(true);
         $base = config('uazapi.base_url');
