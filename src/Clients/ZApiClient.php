@@ -604,6 +604,11 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $startTime = microtime(true);
         $params = ['phone' => $to, 'message' => $message, 'buttonActions' => [['type' => 'URL', 'url' => $url, 'label' => $label]]];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
+        // Z-API does not document the delay params on send-button-actions (only
+        // on send-text/send-link), so typing here is best-effort: the param is
+        // forwarded and silently ignored if the endpoint does not honour it.
+        if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
+        $params = $this->applyTypingOption($params, $options);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-button-actions'], $this->baseUrl());
         $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(120)->post($url, $params);
         $this->logRequest('sendButtonLink', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $params);
@@ -677,6 +682,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
         if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
+        $params = $this->applyTypingOption($params, $options);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-link'], $this->baseUrl());
         $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(120)->post($url, $params);
         $this->logRequest('sendLink', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $params);
