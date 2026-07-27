@@ -106,7 +106,8 @@ $res = WapiGateway::instances(ProviderEnum::ZApi)->configureProxy($uid, $token, 
 
 ### Typing "escribiendo…" provider-agnóstico
 
-`sendText`/`sendFile`/`sendButtons`/`sendOptionList` aceptan la opción `typing` (opt-in):
+`sendText`/`sendFile`/`sendButtons`/`sendOptionList`/`sendLink`/`sendButtonLink`
+aceptan la opción `typing` (opt-in):
 
 ```php
 $response = WapiGateway::messages($provider)->sendText($uid, $token, $phone, $msg, [
@@ -137,6 +138,38 @@ if (WapiGateway::messages($provider)->handlesTypingDelayServerSide()) {
     // Meta: sendTypingIndicator($uid, $token, $wamid) + job diferido propio para el send.
 }
 ```
+
+> UAZAPI (deprecado) ignora la opción `typing`: su `delay` server-side sólo se
+> cablea vía `delayMessage`. En `sendButtonLink()` sobre Z-API/Funapi el
+> `delayTyping` se manda igual, pero el endpoint `send-button-actions` no lo
+> documenta: ahí el typing es best-effort.
+
+### Preview de links (`sendLink`)
+
+| Provider | Tarjeta de preview | Título / descripción / imagen custom |
+|----------|--------------------|--------------------------------------|
+| Z-API / Z-API Lite / Funapi | ✅ vía `send-link` | ✅ (`title`, `linkDescription`, `image`) |
+| UAZAPI | ✅ vía `linkPreview` | ✅ |
+| Meta (WhatsApp Cloud) | ⚠️ best-effort vía `preview_url` | ❌ no soportado por la API |
+
+En Meta el cuerpo y la URL viajan como un único mensaje de texto con
+`text.preview_url = true`. Dos techos propios de la Cloud API:
+
+1. **La tarjeta la arma Meta scrapeando las etiquetas Open Graph de la página
+   destino.** No se pueden pasar título, descripción ni imagen custom en un
+   mensaje de texto — a diferencia de `send-link` de Z-API/Funapi, esas opciones
+   se ignoran.
+2. **Meta sólo renderiza el preview cuando ya existe relación previa con el
+   número** (plantilla enviada antes, click-to-chat, o el negocio guardado en la
+   agenda del contacto). Aun con el flag es best-effort.
+
+Además, el cliente previsualiza **la primera URL del body**: si `$message` ya
+trae una URL, esa gana sobre `$linkUrl` (que se concatena al final, separado por
+un espacio — misma composición que persiste `conversations` en el historial).
+
+El contrato que sí se garantiza en los cuatro providers: **el link llega y es
+clickeable**. Para una tarjeta con contenido controlado por el emisor en Meta,
+usar `sendButtonLink()` (`interactive.cta_url`, nativo).
 
 ## Compatibilidad de Proveedores
 

@@ -551,6 +551,8 @@ class FunapiClient extends ZApiClient
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
         if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+        if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
+        $payload = $this->applyTypingOption($payload, $options);
 
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
             ->timeout(config('funapi.timeout', 29))
@@ -653,6 +655,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
+        $payload = $this->applyTypingOption($payload, $options);
 
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
             ->timeout(config('funapi.timeout', 29))

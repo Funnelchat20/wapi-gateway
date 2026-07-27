@@ -162,6 +162,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public function sendButtonLink(string $uid, string $token, string $to, string $message, string $url, string $label, array $options = []): array
     {
+        $typingResult = $this->fireTypingIndicator($uid, $token, $options);
         $startTime = microtime(true);
         $payload = [
             'messaging_product' => 'whatsapp',
@@ -177,10 +178,10 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $res = Http::withToken($token)->post($requestUrl, $payload);
         if ($res->failed()) {
             $this->logRequest('sendButtonLink', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $requestUrl, $payload);
-            return ['error' => $res->json('error', 'Failed to send')];
+            return $this->withTypingResult(['error' => $res->json('error', 'Failed to send')], $typingResult);
         }
         $this->logRequest('sendButtonLink', $uid, ['phone' => $to], $startTime, $res, $requestUrl, $payload);
-        return MessageResource::make($res->json());
+        return $this->withTypingResult(MessageResource::make($res->json()), $typingResult);
     }
 
     public function sendOptionList(string $uid, string $token, string $to, string $message, string $buttonLabel, array $optionsList, array $extra = []): array
@@ -240,18 +241,39 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return ['error' => 'Not supported'];
     }
 
+    /**
+     * The Cloud API only renders the link card when `preview_url` is set inside
+     * the `text` object. Two ceilings apply, unlike Z-API/Funapi's send-link:
+     * the card is scraped from the destination page's Open Graph tags (title,
+     * description and image options are not accepted here), and Meta renders it
+     * only when there is a prior relationship with the number (template sent
+     * before, click-to-chat, or the business saved in the contact's address
+     * book). The link always arrives clickable; the card is best-effort.
+     *
+     * The client previews the FIRST url in the body, so a $message that already
+     * carries a url wins over $linkUrl — which is appended last.
+     */
     public function sendLink(string $uid, string $token, string $to, string $message, string $linkUrl, array $options = []): array
     {
+        $typingResult = $this->fireTypingIndicator($uid, $token, $options);
         $startTime = microtime(true);
-        $payload = ['messaging_product' => 'whatsapp', 'to' => $to, 'type' => 'text', 'text' => ['body' => $message . ' ' . $linkUrl]];
+        // Body and URL joined by a space on purpose: `conversations` persists the
+        // same composition for the agent's history, so a different separator here
+        // would desync what the contact sees from what the agent reads.
+        $payload = [
+            'messaging_product' => 'whatsapp',
+            'to' => $to,
+            'type' => 'text',
+            'text' => ['body' => $message . ' ' . $linkUrl, 'preview_url' => true],
+        ];
         $url = $this->graph . $uid . '/messages';
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendLink', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
-            return ['error' => $res->json('error', 'Failed to send')];
+            return $this->withTypingResult(['error' => $res->json('error', 'Failed to send')], $typingResult);
         }
         $this->logRequest('sendLink', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
-        return MessageResource::make($res->json());
+        return $this->withTypingResult(MessageResource::make($res->json()), $typingResult);
     }
 
     public function sendEvent(string $uid, string $token, string $toGroupPhone, array $event, array $options = []): array
