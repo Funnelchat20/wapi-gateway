@@ -171,6 +171,80 @@ El contrato que sí se garantiza en los cuatro providers: **el link llega y es
 clickeable**. Para una tarjeta con contenido controlado por el emisor en Meta,
 usar `sendButtonLink()` (`interactive.cta_url`, nativo).
 
+### Envío a BSUID (Business-Scoped User ID) en Meta
+
+Desde el rollout de Meta del **2026-07-29**, los contactos que llegan por
+username sin interacción reciente **no traen teléfono**: el inbound sólo trae un
+Business-Scoped User ID. Para poder contestarles, `MetaClient` detecta el destino
+y arma el payload en consecuencia:
+
+| Destino | Campo en el payload |
+|---------|---------------------|
+| Teléfono (`5491123456789`) | `to` |
+| BSUID (`CO.1021346770783737`) | `recipient` |
+| BSUID enterprise (`US.ENT.11815799212886844830`) | `recipient` |
+| BSUID con otros segmentos (`US.XYZ.118157992128868`) | `recipient` |
+
+**Nunca se mandan los dos.** Si `to` y `recipient` viajan juntos, Meta resuelve
+el teléfono e ignora el BSUID, y la respuesta termina en la conversación
+equivocada.
+
+El destino se pasa igual que siempre — no hay parámetro ni flag nuevo:
+
+```php
+// Anda idéntico con teléfono o con BSUID.
+$meta->sendText($wabaId, $token, 'CO.1021346770783737', 'Hola!');
+```
+
+La detección vive en `WhatsAppCloudHelper::isBsuid()`: código de país alpha-2 +
+punto + id alfanumérico de hasta 128 chars, con cualquier cantidad de segmentos
+intermedios (`ENT` es el que se vio hasta ahora, no el único posible).
+
+La regla **tiene que quedar al menos tan permisiva** como
+`ContactService::isNonPhoneIdentifier()` en `conversations`, que es la que decide
+que el contacto no tiene teléfono y guarda el BSUID en `whatsapp_id`. Si algo que
+allá se guarda como no-teléfono acá se lee como teléfono, sale en `to` y el envío
+falla — justo el bug que esto viene a arreglar. Por eso se aceptan también el
+código de país en minúsculas y los segmentos arbitrarios. La única diferencia
+buscada es el sufijo `@lid` de Z-API, sin equivalente en la Cloud API.
+
+Ser permisivo no cuesta nada en el eje peligroso: un teléfono no puede matchear
+el patrón porque no tiene ni letras ni puntos. La seguridad viene de exigir dos
+letras y un punto, no de apretar el alfabeto. Un test diferencial
+(`test_is_at_least_as_permissive_as_the_conversations_mirror`) lleva el patrón
+del espejo copiado y falla si las dos reglas se separan.
+
+Cobertura: `sendText`, `sendFile`, `sendLocation`, `sendButtons`,
+`sendButtonLink`, `sendOptionList`, `sendLink`, `sendTemplate` y `sendContact`.
+`sendPoll` y `sendPtv` siguen siendo `Not supported` en Meta, y
+`sendTypingIndicator` no toma destino (va contra el `wamid` del inbound).
+
+**Dos límites que impone Meta, no el SDK:**
+
+1. Un destino BSUID **acepta menos mensajes** que un teléfono. Cuando el mensaje
+   no aplica, Meta responde **131062** (*"Business-scoped User ID (BSUID)
+   recipients are not supported for this message"*) y el SDK lo marca en el
+   resultado para que el caller no reintente el mismo payload en vano:
+
+   ```php
+   $res = $meta->sendTemplate($wabaId, $token, $bsuid, 'otp_login', 'es', []);
+   if ($res['unsupported_for_bsuid'] ?? false) {
+       // $res['error_code'] === 131062 — reintentar igual nunca va a andar:
+       // hay que reenviar algo que el destinatario sí soporte, o conseguir el
+       // teléfono (ver el punto 2, que es el caso documentado hoy).
+   }
+   ```
+
+   El error crudo de Meta se preserva intacto en `$res['error']`; las claves
+   extra sólo aparecen con 131062 **y** cuando el destino que se armó fue un
+   BSUID, así que los envíos a teléfono no cambian.
+
+2. Las **plantillas de autenticación** one-tap, zero-tap y copy-code **siguen
+   exigiendo teléfono** por regla de Meta — hoy es el único caso documentado que
+   dispara el 131062 del punto anterior. El SDK no puede detectarlo por
+   adelantado (la categoría no se deduce de los argumentos de `sendTemplate()`),
+   así que evitar esa combinación queda del lado del caller.
+
 ## Compatibilidad de Proveedores
 
 ### 📨 Mensajería

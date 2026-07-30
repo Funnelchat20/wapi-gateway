@@ -25,6 +25,68 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     private const TYPING_INDICATOR_TIMEOUT = 5;
 
+    /**
+     * Meta's "Business-scoped User ID (BSUID) recipients are not supported for
+     * this message". A BSUID destination accepts a narrower set of messages
+     * than a phone (Meta excludes one-tap, zero-tap and copy-code
+     * authentication templates), so a send that works for 97% of the traffic
+     * can still be rejected here.
+     */
+    private const ERROR_UNSUPPORTED_FOR_BSUID = 131062;
+
+    /**
+     * Meta addresses a phone destination through `to` and a BSUID destination
+     * through `recipient`, and it must be exactly one of them: when both are
+     * present Meta resolves the phone and ignores the BSUID, so the reply
+     * silently lands in the wrong conversation (or nowhere).
+     *
+     * Every send spreads this instead of hardcoding `'to' => $to`, which keeps
+     * the phone path byte-identical to what it was before BSUID support — the
+     * value is passed through untouched, trimming only on the (new) BSUID
+     * branch, where isBsuid() already ignored the padding to classify it.
+     */
+    private function recipientField(string $to): array
+    {
+        return WhatsAppCloudHelper::isBsuid($to)
+            ? ['recipient' => trim($to)]
+            : ['to' => $to];
+    }
+
+    /**
+     * Normalizes a failed send into the same ['error' => ...] shape the clients
+     * have always returned, adding a machine-readable flag when Meta rejects
+     * the message *type* for a BSUID recipient. Callers need to tell that apart
+     * from a generic failure: retrying the identical payload will never succeed
+     * — the message has to be re-sent as a type the recipient supports.
+     *
+     * The raw Meta error is preserved untouched under `error`, and the extra
+     * keys only ever appear when the destination we actually addressed was a
+     * BSUID: `error_subcode` lives in a different numbering space than `code`,
+     * so a phone send that happens to come back with subcode 131062 must not
+     * be mislabelled as a BSUID-unsupported send. Phone sends are unaffected.
+     */
+    private function sendError($res, string $to): array
+    {
+        $error = $res->json('error', 'Failed to send');
+        $result = ['error' => $error];
+        if (!is_array($error) || !WhatsAppCloudHelper::isBsuid($to)) {
+            return $result;
+        }
+        // Both fields are checked independently, not with a `??` fallback:
+        // Graph sometimes reports a generic `code` (100) and carries the real
+        // reason in `error_subcode`, so the first key being present says
+        // nothing about where 131062 actually is.
+        $isUnsupported = (int) ($error['code'] ?? 0) === self::ERROR_UNSUPPORTED_FOR_BSUID
+            || (int) ($error['error_subcode'] ?? 0) === self::ERROR_UNSUPPORTED_FOR_BSUID;
+        if (!$isUnsupported) {
+            return $result;
+        }
+        $result['error_code'] = self::ERROR_UNSUPPORTED_FOR_BSUID;
+        $result['unsupported_for_bsuid'] = true;
+
+        return $result;
+    }
+
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
     {
         // Fired before $startTime so the send's logged duration excludes the
@@ -34,14 +96,14 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $url = $this->graph . $uid . '/messages';
         $payload = [
             'messaging_product' => 'whatsapp',
-            'to' => $to,
+            ...$this->recipientField($to),
             'type' => 'text',
             'text' => ['body' => $text],
         ];
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendText', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
-            return $this->withTypingResult(['error' => $res->json('error', 'Failed to send')], $typingResult);
+            return $this->withTypingResult($this->sendError($res, $to), $typingResult);
         }
         $this->logRequest('sendText', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
         return $this->withTypingResult(MessageResource::make($res->json()), $typingResult);
@@ -87,14 +149,14 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $typingResult = $this->fireTypingIndicator($uid, $token, $options);
         $startTime = microtime(true);
         $media = isset($options['mediaId']) ? ['id' => $options['mediaId']] : ['link' => $fileUrl];
-        $payload = ['messaging_product' => 'whatsapp', 'to' => $to, 'type' => $type, $type => $media];
+        $payload = ['messaging_product' => 'whatsapp', ...$this->recipientField($to), 'type' => $type, $type => $media];
         if (isset($options['fileName']) && $type === 'document') $payload[$type]['filename'] = $options['fileName'];
         if (isset($options['caption']) && in_array($type, ['image', 'video', 'document'])) $payload[$type]['caption'] = $options['caption'];
         $url = $this->graph . $uid . '/messages';
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendFile', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to, 'file_type' => $ext], $startTime, $res, $url, $payload);
-            return $this->withTypingResult(['error' => $res->json('error', 'Failed to send')], $typingResult);
+            return $this->withTypingResult($this->sendError($res, $to), $typingResult);
         }
         $this->logRequest('sendFile', $uid, ['phone' => $to, 'file_type' => $ext], $startTime, $res, $url, $payload);
         return $this->withTypingResult(MessageResource::make($res->json()), $typingResult);
@@ -103,14 +165,14 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     public function sendLocation(string $uid, string $token, string $to, float $lat, float $lng, array $options = []): array
     {
         $startTime = microtime(true);
-        $payload = ['messaging_product' => 'whatsapp', 'to' => $to, 'type' => 'location', 'location' => ['latitude' => $lat, 'longitude' => $lng]];
+        $payload = ['messaging_product' => 'whatsapp', ...$this->recipientField($to), 'type' => 'location', 'location' => ['latitude' => $lat, 'longitude' => $lng]];
         if (isset($options['name'])) $payload['location']['name'] = $options['name'];
         if (isset($options['address'])) $payload['location']['address'] = $options['address'];
         $url = $this->graph . $uid . '/messages';
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendLocation', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
-            return ['error' => $res->json('error', 'Failed to send')];
+            return $this->sendError($res, $to);
         }
         $this->logRequest('sendLocation', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
         return MessageResource::make($res->json());
@@ -131,7 +193,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $startTime = microtime(true);
         $payload = [
             'messaging_product' => 'whatsapp',
-            'to' => $to,
+            ...$this->recipientField($to),
             'type' => 'interactive',
             'interactive' => [
                 'type' => 'button',
@@ -154,7 +216,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendButtons', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
-            return $this->withTypingResult(['error' => $res->json('error', 'Failed to send')], $typingResult);
+            return $this->withTypingResult($this->sendError($res, $to), $typingResult);
         }
         $this->logRequest('sendButtons', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
         return $this->withTypingResult(MessageResource::make($res->json()), $typingResult);
@@ -166,7 +228,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $startTime = microtime(true);
         $payload = [
             'messaging_product' => 'whatsapp',
-            'to' => $to,
+            ...$this->recipientField($to),
             'type' => 'interactive',
             'interactive' => [
                 'type' => 'cta_url',
@@ -178,7 +240,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $res = Http::withToken($token)->post($requestUrl, $payload);
         if ($res->failed()) {
             $this->logRequest('sendButtonLink', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $requestUrl, $payload);
-            return $this->withTypingResult(['error' => $res->json('error', 'Failed to send')], $typingResult);
+            return $this->withTypingResult($this->sendError($res, $to), $typingResult);
         }
         $this->logRequest('sendButtonLink', $uid, ['phone' => $to], $startTime, $res, $requestUrl, $payload);
         return $this->withTypingResult(MessageResource::make($res->json()), $typingResult);
@@ -215,7 +277,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
         $payload = [
             'messaging_product' => 'whatsapp',
-            'to' => $to,
+            ...$this->recipientField($to),
             'type' => 'interactive',
             'interactive' => [
                 'type' => 'list',
@@ -230,7 +292,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendOptionList', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
-            return $this->withTypingResult(['error' => $res->json('error', 'Failed to send')], $typingResult);
+            return $this->withTypingResult($this->sendError($res, $to), $typingResult);
         }
         $this->logRequest('sendOptionList', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
         return $this->withTypingResult(MessageResource::make($res->json()), $typingResult);
@@ -262,7 +324,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         // would desync what the contact sees from what the agent reads.
         $payload = [
             'messaging_product' => 'whatsapp',
-            'to' => $to,
+            ...$this->recipientField($to),
             'type' => 'text',
             'text' => ['body' => $message . ' ' . $linkUrl, 'preview_url' => true],
         ];
@@ -270,7 +332,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendLink', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
-            return $this->withTypingResult(['error' => $res->json('error', 'Failed to send')], $typingResult);
+            return $this->withTypingResult($this->sendError($res, $to), $typingResult);
         }
         $this->logRequest('sendLink', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
         return $this->withTypingResult(MessageResource::make($res->json()), $typingResult);
@@ -281,12 +343,20 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return ['error' => 'Not supported'];
     }
 
+    /**
+     * $to may be a phone or a BSUID, with one caveat the SDK cannot enforce:
+     * Meta still requires a real phone number for one-tap, zero-tap and
+     * copy-code authentication templates. The category is not derivable from
+     * ($name, $languageCode, $components), so routing an authentication
+     * template to a BSUID is the caller's call to avoid — Meta rejects it at
+     * send time rather than the payload being built wrong here.
+     */
     public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
     {
         $startTime = microtime(true);
         $payload = [
             'messaging_product' => 'whatsapp',
-            'to' => $to,
+            ...$this->recipientField($to),
             'type' => 'template',
             'template' => [
                 'name' => $name,
@@ -298,7 +368,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendTemplate', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
-            return ['error' => $res->json('error', 'Failed to send')];
+            return $this->sendError($res, $to);
         }
         $this->logRequest('sendTemplate', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
         return MessageResource::make($res->json());
@@ -413,7 +483,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $startTime = microtime(true);
         $payload = [
             'messaging_product' => 'whatsapp',
-            'to' => $to,
+            ...$this->recipientField($to),
             'type' => 'contacts',
             'contacts' => [[
                 'name' => ['formatted_name' => $contactName, 'first_name' => $contactName],
@@ -424,7 +494,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendContact', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
-            return ['error' => $res->json('error', 'Failed to send')];
+            return $this->sendError($res, $to);
         }
         $this->logRequest('sendContact', $uid, ['phone' => $to], $startTime, $res, $url, $payload);
         return MessageResource::make($res->json());
