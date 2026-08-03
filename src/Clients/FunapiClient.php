@@ -618,7 +618,8 @@ class FunapiClient extends ZApiClient
         $payload = [
             'phone' => $to,
             'message' => $message,
-            'poll' => $pollOptions,
+            // Wrap each option as {name: ...} to match Z-API (see ZApiClient::sendPoll).
+            'poll' => array_map(fn($o) => ['name' => $o], $pollOptions),
         ];
         if (isset($options['pollMaxOptions'])) $payload['pollMaxOptions'] = (int) $options['pollMaxOptions'];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
