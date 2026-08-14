@@ -548,6 +548,9 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'category' => $data['category'],
             'components' => $components
         ];
+        if (array_key_exists('allow_category_change', $data)) {
+            $payload['allow_category_change'] = $data['allow_category_change'];
+        }
         $url = $this->graph . $wabaId . '/message_templates';
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
