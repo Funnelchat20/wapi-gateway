@@ -148,6 +148,83 @@ class MetaClientBsuidTest extends TestCase
         Http::assertSentCount(2);
     }
 
+    /** Meta documents `recipient_type` alongside `recipient`; BSUID branch only. */
+    #[DataProvider('sendMethodProvider')]
+    public function test_a_bsuid_send_declares_recipient_type_individual(callable $send): void
+    {
+        $this->fakeGraph();
+
+        $send(new MetaClient(), self::BSUID);
+
+        Http::assertSent(function ($request) {
+            $data = $request->data();
+            if (!isset($data['type'])) {
+                return false; // the mark-as-read/typing call, not a send
+            }
+
+            return ($data['recipient_type'] ?? null) === 'individual';
+        });
+    }
+
+    #[DataProvider('sendMethodProvider')]
+    public function test_a_phone_send_does_not_declare_recipient_type(callable $send): void
+    {
+        $this->fakeGraph();
+
+        $send(new MetaClient(), self::PHONE);
+
+        Http::assertSent(function ($request) {
+            $data = $request->data();
+            if (!isset($data['type'])) {
+                return false;
+            }
+
+            return !array_key_exists('recipient_type', $data);
+        });
+    }
+
+    /**
+     * The gap that let BSUID support ship broken: these tests mock
+     * `graph.facebook.com/*`, so a payload built against a too-old version
+     * passed them all. Asserting the URL, not just the body, closes it.
+     */
+    #[DataProvider('sendMethodProvider')]
+    public function test_a_bsuid_send_targets_a_graph_version_that_knows_recipient(callable $send): void
+    {
+        $this->fakeGraph();
+
+        $send(new MetaClient(), self::BSUID);
+
+        Http::assertSent(fn($request) => str_contains($request->url(), '/v26.0/'));
+    }
+
+    /**
+     * The regression guard for this change: phone traffic must stay exactly
+     * where it was. Pinned on purpose so moving $graph is a deliberate edit.
+     */
+    #[DataProvider('sendMethodProvider')]
+    public function test_a_phone_send_stays_on_the_pinned_graph_version(callable $send): void
+    {
+        $this->fakeGraph();
+
+        $send(new MetaClient(), self::PHONE);
+
+        Http::assertSent(fn($request) => str_contains($request->url(), '/v20.0/'));
+    }
+
+    /** The indicator carries no destination, so it cannot be routed by one. */
+    public function test_the_typing_indicator_stays_on_the_pinned_graph_version(): void
+    {
+        $this->fakeGraph();
+
+        (new MetaClient())->sendText('WABA', 'TOKEN', self::BSUID, 'Hola', [
+            'typing' => ['lastInboundId' => 'wamid.IN'],
+        ]);
+
+        Http::assertSent(fn($request) => ($request->data()['status'] ?? null) === 'read'
+            && str_contains($request->url(), '/v20.0/'));
+    }
+
     /**
      * 131062 = message type not supported for this recipient. Callers must be
      * able to tell it apart from a generic failure, because retrying the same
