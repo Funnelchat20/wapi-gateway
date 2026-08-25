@@ -48,28 +48,8 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     private function recipientField(string $to): array
     {
         return WhatsAppCloudHelper::isBsuid($to)
-            ? ['recipient_type' => 'individual', 'recipient' => trim($to)]
+            ? ['recipient' => trim($to)]
             : ['to' => $to];
-    }
-
-    /**
-     * `recipient` shipped in July 2026; $graph is pinned to v20.0 (2024-05).
-     * Meta drops post-pin parameters silently, so the BSUID left here and
-     * arrived with no destination — hence the generic 131000.
-     */
-    private const BSUID_GRAPH_VERSION = 'v26.0';
-
-    /**
-     * Routes ONLY a BSUID to the newer version; phone sends keep the pin
-     * untouched. A BSUID send fails 100% today, so there is nothing working
-     * to regress. Moving $graph itself is a separate change — it must happen
-     * before v20.0 expires 2026-09-24, with its own testing.
-     */
-    private function messagesUrl(string $uid, string $to): string
-    {
-        return WhatsAppCloudHelper::isBsuid($to)
-            ? 'https://graph.facebook.com/' . self::BSUID_GRAPH_VERSION . '/' . $uid . '/messages'
-            : $this->graph . $uid . '/messages';
     }
 
     /**
@@ -113,7 +93,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         // indicator round-trip (the indicator logs its own duration).
         $typingResult = $this->fireTypingIndicator($uid, $token, $options);
         $startTime = microtime(true);
-        $url = $this->messagesUrl($uid, $to);
+        $url = $this->graph . $uid . '/messages';
         $payload = [
             'messaging_product' => 'whatsapp',
             ...$this->recipientField($to),
@@ -172,7 +152,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $payload = ['messaging_product' => 'whatsapp', ...$this->recipientField($to), 'type' => $type, $type => $media];
         if (isset($options['fileName']) && $type === 'document') $payload[$type]['filename'] = $options['fileName'];
         if (isset($options['caption']) && in_array($type, ['image', 'video', 'document'])) $payload[$type]['caption'] = $options['caption'];
-        $url = $this->messagesUrl($uid, $to);
+        $url = $this->graph . $uid . '/messages';
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendFile', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to, 'file_type' => $ext], $startTime, $res, $url, $payload);
@@ -188,7 +168,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $payload = ['messaging_product' => 'whatsapp', ...$this->recipientField($to), 'type' => 'location', 'location' => ['latitude' => $lat, 'longitude' => $lng]];
         if (isset($options['name'])) $payload['location']['name'] = $options['name'];
         if (isset($options['address'])) $payload['location']['address'] = $options['address'];
-        $url = $this->messagesUrl($uid, $to);
+        $url = $this->graph . $uid . '/messages';
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendLocation', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
@@ -232,7 +212,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         if ($headerType !== null) {
             $payload['interactive']['header'] = ['type' => $headerType, $headerType => ['link' => $options['fileUrl']]];
         }
-        $url = $this->messagesUrl($uid, $to);
+        $url = $this->graph . $uid . '/messages';
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendButtons', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
@@ -256,7 +236,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 'action' => ['name' => 'cta_url', 'parameters' => ['display_text' => $label, 'url' => $url]]
             ]
         ];
-        $requestUrl = $this->messagesUrl($uid, $to);
+        $requestUrl = $this->graph . $uid . '/messages';
         $res = Http::withToken($token)->post($requestUrl, $payload);
         if ($res->failed()) {
             $this->logRequest('sendButtonLink', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $requestUrl, $payload);
@@ -308,7 +288,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 ]
             ]
         ];
-        $url = $this->messagesUrl($uid, $to);
+        $url = $this->graph . $uid . '/messages';
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendOptionList', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
@@ -348,7 +328,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'type' => 'text',
             'text' => ['body' => $message . ' ' . $linkUrl, 'preview_url' => true],
         ];
-        $url = $this->messagesUrl($uid, $to);
+        $url = $this->graph . $uid . '/messages';
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendLink', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
@@ -384,7 +364,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 'components' => $components
             ]
         ];
-        $url = $this->messagesUrl($uid, $to);
+        $url = $this->graph . $uid . '/messages';
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendTemplate', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
@@ -510,7 +490,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 'phones' => [[ 'phone' => $contactPhone, 'wa_id' => $contactPhone ]]
             ]]
         ];
-        $url = $this->messagesUrl($uid, $to);
+        $url = $this->graph . $uid . '/messages';
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendContact', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
