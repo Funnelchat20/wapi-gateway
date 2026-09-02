@@ -15,6 +15,25 @@ namespace Funnelchat\WapiGateway\Contracts;
  * translate it to their native delayTyping param. Meta fires the typing indicator
  * right before the send when `lastInboundId` is present — best-effort: an indicator
  * failure never fails the send, it is reported under `typing_result` in the result.
+ *
+ * A `messageId` option quotes an existing message — the outgoing message renders as
+ * a reply to it, in 1:1 chats and in groups:
+ *
+ *     'messageId' => $providerMessageId, // id of the message being quoted
+ *
+ * The quoted message's own type does not matter: the id is opaque to the provider,
+ * so a text reply can quote an image. A blank value is treated as "no quote".
+ *
+ * Honored by: sendText, sendFile, sendLocation, sendLink, sendContact, sendPtv.
+ * Ignored by: sendPoll, sendOptionList, sendButtons, sendButtonLink, sendEvent —
+ * the underlying z-api endpoints do not accept the param. sendFile is partial: it
+ * routes per file extension and send-audio is the one target that does not take it,
+ * so quoting an audio reply is silently skipped (see ZApiClient::QUOTE_UNSUPPORTED_ACTIONS).
+ *
+ * NOT provider-agnostic — only z-api (and therefore ZApiLite, which extends it) and
+ * funapi honor it; Meta and Uazapi silently ignore it. Meta needs a different wire
+ * shape (`context.message_id`) and is not covered because WhatsApp Cloud API has no
+ * group support, which is the only consumer so far. Uazapi is untested.
  */
 interface MessagesContract
 {
