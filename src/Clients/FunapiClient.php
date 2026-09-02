@@ -431,6 +431,9 @@ class FunapiClient extends ZApiClient
         if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
+        if (! in_array($action, self::QUOTE_UNSUPPORTED_ACTIONS, true)) {
+            $params = $this->applyQuoteOption($params, $options);
+        }
         $params = $this->applyTypingOption($params, $options);
 
         // Automatically enable async processing for video files (improves performance and prevents timeouts)
@@ -496,6 +499,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
+        $params = $this->applyQuoteOption($params, $options);
         $url = $this->buildUrl($uid, $token, 'send-location');
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(120)->post($url, $params);
         $this->logRequest('sendLocation', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $params);
@@ -662,6 +666,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
+        $payload = $this->applyQuoteOption($payload, $options);
         $payload = $this->applyTypingOption($payload, $options);
 
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
@@ -1092,6 +1097,7 @@ class FunapiClient extends ZApiClient
         $url = $this->buildUrl($uid, $token, 'send-contact');
         $payload = ['phone' => $to, 'contactName' => $contactName, 'contactPhone' => $contactPhone];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+        $payload = $this->applyQuoteOption($payload, $options);
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
         $this->logRequest('sendContact', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];

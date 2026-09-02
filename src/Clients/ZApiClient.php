@@ -55,10 +55,17 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     protected const QR_CODE_RETRIEVAL_ERROR_MESSAGE = 'Error retrieving QR code.';
 
     /**
-     * `$options['messageId']` quotes an existing message: z-api relates the
-     * outgoing message to the id provided, rendering it as a reply. Works in
-     * groups. An empty/blank value is treated as "no quote" so callers can
-     * pass a nullable field straight through without branching.
+     * `sendFile` routes to a different Z-API endpoint per file extension, and
+     * they do not all accept the `messageId` quote param — send-audio is the
+     * lone exception among the types `mapAction()` produces. The param is
+     * withheld there rather than sent and hoped to be ignored, so an unrelated
+     * audio send can never fail because of a quote it could not honor anyway.
+     */
+    protected const QUOTE_UNSUPPORTED_ACTIONS = ['send-audio'];
+
+    /**
+     * `$options['messageId']` quotes an existing message — see
+     * {@see self::applyQuoteOption()}. Works in groups.
      */
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
     {
@@ -69,7 +76,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
-        if (isset($options['messageId']) && trim((string) $options['messageId']) !== '') $payload['messageId'] = (string) $options['messageId'];
+        $payload = $this->applyQuoteOption($payload, $options);
         $payload = $this->applyTypingOption($payload, $options);
 
         $request = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
@@ -481,12 +488,17 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return $res->json('participants') ?? [];
     }
 
+    /**
+     * `$options['messageId']` quotes an existing message, EXCEPT when the file
+     * resolves to send-audio — see {@see self::QUOTE_UNSUPPORTED_ACTIONS}.
+     */
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
         $startTime = microtime(true);
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $action = $this->mapAction($ext);
         if ($action === 'invalid') return ['error' => 'Invalid file extension'];
+        $quotable = ! in_array($action, self::QUOTE_UNSUPPORTED_ACTIONS, true);
         if ($action === 'send-document') $action = $action . '/' . $ext;
         $attr = $this->mapAttr($ext);
         $params = ['phone' => $to, $attr => $fileUrl];
@@ -496,6 +508,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
+        if ($quotable) $params = $this->applyQuoteOption($params, $options);
         $params = $this->applyTypingOption($params, $options);
 
         // Automatically enable async processing for video files (improves performance and prevents timeouts)
@@ -561,6 +574,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
+        $params = $this->applyQuoteOption($params, $options);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-location'], $this->baseUrl());
         $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(120)->post($url, $params);
         $this->logRequest('sendLocation', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $params);
@@ -689,6 +703,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
         if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
+        $params = $this->applyQuoteOption($params, $options);
         $params = $this->applyTypingOption($params, $options);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-link'], $this->baseUrl());
         $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(120)->post($url, $params);
@@ -979,6 +994,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-contact'], $this->baseUrl());
         $payload = ['phone' => $to, 'contactName' => $contactName, 'contactPhone' => $contactPhone];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+        $payload = $this->applyQuoteOption($payload, $options);
         $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->post($url, $payload);
         $this->logRequest('sendContact', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
@@ -1279,6 +1295,8 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
             $params['delayTyping'] = (int) $options['delayTyping'];
         }
 
+        $params = $this->applyQuoteOption($params, $options);
+
         $request = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
             ->timeout(config("$this->configPrefix.timeout", 120));
 
@@ -1346,6 +1364,25 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $delaySeconds = $options['typing']['delaySeconds'] ?? null;
         if (!isset($params['delayTyping']) && is_numeric($delaySeconds)) {
             $params['delayTyping'] = (int) $delaySeconds;
+        }
+        return $params;
+    }
+
+    /**
+     * Translate the `messageId` option into Z-API's quote param of the same
+     * name: the outgoing message is related to the quoted one and renders as
+     * a reply. The quoted message's own type is irrelevant — the id is opaque
+     * to the provider, so a text reply can quote an image just as well.
+     *
+     * A blank value is dropped rather than forwarded: Z-API rejects the send
+     * on an empty `messageId` instead of degrading to a plain message, so
+     * callers can pass a nullable field straight through without branching.
+     */
+    protected function applyQuoteOption(array $params, array $options): array
+    {
+        $messageId = $options['messageId'] ?? null;
+        if (is_scalar($messageId) && trim((string) $messageId) !== '') {
+            $params['messageId'] = (string) $messageId;
         }
         return $params;
     }
