@@ -81,6 +81,11 @@ class FunapiClient extends ZApiClient
         return $request->put($this->buildUrl($uid, $token, 'update-proxy'), ['proxyUrl' => $proxyUrl]);
     }
 
+    /**
+     * `$options['messageId']` quotes an existing message — same contract and
+     * wire field as {@see ZApiClient::sendText()} (funapi mirrors the z-api
+     * send-text payload). A blank value is treated as "no quote".
+     */
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
     {
         $startTime = microtime(true);
@@ -90,6 +95,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
+        if (isset($options['messageId']) && trim((string) $options['messageId']) !== '') $payload['messageId'] = (string) $options['messageId'];
         $payload = $this->applyTypingOption($payload, $options);
 
         $request = Http::withHeaders(['Client-Token' => config('funapi.client_token')])

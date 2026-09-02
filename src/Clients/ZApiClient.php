@@ -54,6 +54,12 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     protected const INSTANCE_STATUSES = [self::YOU_ARE_ALREADY_CONNECTED, self::YOU_ARE_NOT_CONNECTED];
     protected const QR_CODE_RETRIEVAL_ERROR_MESSAGE = 'Error retrieving QR code.';
 
+    /**
+     * `$options['messageId']` quotes an existing message: z-api relates the
+     * outgoing message to the id provided, rendering it as a reply. Works in
+     * groups. An empty/blank value is treated as "no quote" so callers can
+     * pass a nullable field straight through without branching.
+     */
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
     {
         $startTime = microtime(true);
@@ -63,6 +69,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
+        if (isset($options['messageId']) && trim((string) $options['messageId']) !== '') $payload['messageId'] = (string) $options['messageId'];
         $payload = $this->applyTypingOption($payload, $options);
 
         $request = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
