@@ -828,6 +828,91 @@ class FunapiClient extends ZApiClient
         return $res->json();
     }
 
+    /**
+     * Same operation as {@see ZApiClient::forwardMessage()} but NOT the same
+     * wire: the bridge names the source chat `sourceChat`, where z-api calls it
+     * `messagePhone`. Sending z-api's name here fails the bridge's own
+     * validation ("Source chat is required"), so the field is translated rather
+     * than passed through.
+     *
+     * The bridge forwards from its in-memory message store, not from WhatsApp:
+     * it clones the original and stamps it as forwarded. A message the store no
+     * longer holds — sent long ago, or predating the last client restart —
+     * comes back 404 rather than being fetched, which is a real runtime
+     * failure mode callers have to expect and z-api does not share.
+     *
+     * `scheduledFor` (ISO 8601) and `delayMessage` are both accepted, but the
+     * bridge caps either at 60 seconds because a forward cannot go through its
+     * queue. `isGroup` is deliberately not sent: the request struct declares it
+     * and the handler never reads it.
+     */
+    public function forwardMessage(string $uid, string $token, string $to, string $messageId, string $sourceChat, array $options = []): array
+    {
+        $startTime = microtime(true);
+        $url = $this->buildUrl($uid, $token, 'forward-message');
+        $payload = ['phone' => $to, 'messageId' => $messageId, 'sourceChat' => $sourceChat];
+        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+        if (isset($options['scheduledFor']) && trim((string) $options['scheduledFor']) !== '') $payload['scheduledFor'] = (string) $options['scheduledFor'];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 60))->post($url, $payload);
+        $this->logRequest('forwardMessage', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
+    /**
+     * Mirrors z-api's send-reaction wire ({@see ZApiClient::sendReaction()}),
+     * with one field z-api has no use for: `sender`.
+     *
+     * The bridge builds the reaction from whatsmeow, which needs the JID of
+     * whoever sent the message being reacted to — not just the chat it lives
+     * in. In a 1:1 those are the same JID and the bridge defaults to the chat,
+     * but in a group they differ, so reacting to another participant's message
+     * needs `$options['sender']`. Omitting it there does not error: the
+     * reaction is built against the group JID and lands on nothing.
+     */
+    public function sendReaction(string $uid, string $token, string $phone, string $messageId, string $reaction, array $options = []): array
+    {
+        if (trim($reaction) === '') return ['error' => 'Reaction emoji is required'];
+
+        $startTime = microtime(true);
+        $url = $this->buildUrl($uid, $token, 'send-reaction');
+        $payload = ['phone' => $phone, 'messageId' => $messageId, 'reaction' => $reaction];
+        $payload = $this->applySenderOption($payload, $options);
+        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 60))->post($url, $payload);
+        $this->logRequest('sendReaction', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error'), 'phone' => $phone] : ['phone' => $phone], $startTime, $res, $url, $payload);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
+    /** Same endpoint split as z-api; the bridge ignores `reaction` here. */
+    public function removeReaction(string $uid, string $token, string $phone, string $messageId, array $options = []): array
+    {
+        $startTime = microtime(true);
+        $url = $this->buildUrl($uid, $token, 'send-remove-reaction');
+        $payload = ['phone' => $phone, 'messageId' => $messageId];
+        $payload = $this->applySenderOption($payload, $options);
+        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 60))->post($url, $payload);
+        $this->logRequest('removeReaction', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error'), 'phone' => $phone] : ['phone' => $phone], $startTime, $res, $url, $payload);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
+    /**
+     * Forward `sender` only when the caller supplied one: the bridge rejects a
+     * malformed sender outright, while an absent one falls back to the chat
+     * JID, which is the right answer for every 1:1.
+     */
+    private function applySenderOption(array $payload, array $options): array
+    {
+        $sender = $options['sender'] ?? null;
+        if (is_scalar($sender) && trim((string) $sender) !== '') {
+            $payload['sender'] = (string) $sender;
+        }
+        return $payload;
+    }
+
     public function addContacts(string $uid, string $token, array $contacts): array
     {
         $startTime = microtime(true);

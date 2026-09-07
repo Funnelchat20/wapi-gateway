@@ -1343,6 +1343,72 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return $res->json();
     }
 
+    /**
+     * Forward an existing message to another chat. Nothing is re-uploaded: the
+     * provider resolves the original from ($messageId, $sourceChat) and sends a
+     * copy carrying WhatsApp's "Forwarded" label, so media keeps its original
+     * upload and any message type works.
+     *
+     * $sourceChat is not optional and not derivable: the same id means nothing
+     * without the chat it lives in, which is why z-api asks for both.
+     */
+    public function forwardMessage(string $uid, string $token, string $to, string $messageId, string $sourceChat, array $options = []): array
+    {
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'forward-message'], $this->baseUrl());
+        $payload = ['phone' => $to, 'messageId' => $messageId, 'messagePhone' => $sourceChat];
+        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 60))->post($url, $payload);
+        $this->logRequest('forwardMessage', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
+    /**
+     * React to a message with an emoji. The reaction is tied to the target by
+     * `messageId`, so it lands on that bubble rather than on the chat; the id
+     * is opaque to the provider, so any message type can be reacted to, in 1:1
+     * and in groups alike.
+     *
+     * WhatsApp keeps one reaction per sender per message, so reacting again
+     * replaces the previous emoji instead of stacking a second one — this is
+     * also how you change a reaction. {@see self::removeReaction()} clears it.
+     *
+     * A blank emoji is refused before the request rather than sent for z-api to
+     * reject: on Meta and Uazapi the same value means "remove", so refusing it
+     * everywhere keeps one meaning for one call across providers.
+     */
+    public function sendReaction(string $uid, string $token, string $phone, string $messageId, string $reaction, array $options = []): array
+    {
+        if (trim($reaction) === '') return ['error' => 'Reaction emoji is required'];
+
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-reaction'], $this->baseUrl());
+        $payload = ['phone' => $phone, 'messageId' => $messageId, 'reaction' => $reaction];
+        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 60))->post($url, $payload);
+        $this->logRequest('sendReaction', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error'), 'phone' => $phone] : ['phone' => $phone], $startTime, $res, $url, $payload);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
+    /**
+     * Clear our own reaction from a message. Z-API exposes this as a separate
+     * endpoint that takes no emoji — there is only ever one reaction of ours to
+     * remove, so naming it would add nothing.
+     */
+    public function removeReaction(string $uid, string $token, string $phone, string $messageId, array $options = []): array
+    {
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-remove-reaction'], $this->baseUrl());
+        $payload = ['phone' => $phone, 'messageId' => $messageId];
+        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 60))->post($url, $payload);
+        $this->logRequest('removeReaction', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error'), 'phone' => $phone] : ['phone' => $phone], $startTime, $res, $url, $payload);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
     public function sendTypingIndicator(string $uid, string $token, string $messageId): array
     {
         // Z-API handles typing indicators via the delayTyping parameter
