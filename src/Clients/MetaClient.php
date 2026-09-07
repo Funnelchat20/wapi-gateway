@@ -414,6 +414,17 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return ['error' => 'Not supported'];
     }
 
+    /**
+     * WhatsApp Cloud API does support reactions in 1:1 chats (via a `reaction`
+     * message type), but it has no group support at all, and the group chat is
+     * the only consumer of this method. Wiring the 1:1 shape here would add a
+     * path nothing calls, so it reports unsupported until something needs it.
+     */
+    public function sendReaction(string $uid, string $token, string $to, string $messageId, string $reaction, array $options = []): array
+    {
+        return ['error' => 'Not supported'];
+    }
+
     public function sendTypingIndicator(string $uid, string $token, string $messageId): array
     {
         $startTime = microtime(true);
