@@ -299,6 +299,34 @@ Cobertura: `sendText`, `sendFile`, `sendLocation`, `sendButtons`,
 | `lightGroupMetadata()` | ✅ | ✅ | ✅ | ❌ |
 | `groupMetadata()` | ✅ | ✅ | ✅ | ❌ |
 
+### 🌐 Grupos API oficial — WhatsApp Cloud API (`CloudApiGroupsContract`)
+
+Solo Meta: la feature nativa de Grupos del Business Platform (Official Business Account,
+tope de 8 participantes, join-request en vez de add-participant directo). Contrato separado
+de `GroupsContract` — no comparte métodos con Z-API/UAZAPI/Funapi porque el modelo de
+capacidades no es compatible (sin add-admin, sin comunidades/newsletters, con join requests).
+
+| Método | Meta |
+|--------|------|
+| `createGroup()` | ✅ |
+| `deleteGroup()` | ✅ |
+| `group()` | ✅ |
+| `groups()` | ✅ |
+| `updateGroupSettings()` | ✅ |
+| `getGroupInviteLink()` | ✅ |
+| `resetGroupInviteLink()` | ✅ |
+| `sendGroupInviteTemplate()` | ✅ |
+| `removeGroupParticipant()` | ✅ |
+| `getGroupJoinRequests()` | ✅ |
+| `approveGroupJoinRequest()` | ✅ |
+| `rejectGroupJoinRequest()` | ✅ |
+
+> ⚠️ El endpoint/método existe y está implementado contra la referencia pública de Meta, pero
+> el body exacto de `removeGroupParticipant()`, `approveGroupJoinRequest()` y
+> `rejectGroupJoinRequest()` (array `participants` con `user`/`user_id`) no está confirmado
+> contra la referencia completa del Graph API — validar contra un número Cloud API Groups real
+> antes de depender de esto en producción.
+
 ### 📇 Contactos
 
 | Método | Z-API | UAZAPI | Funapi | Meta |
@@ -663,6 +691,12 @@ class WhatsAppController extends Controller
 ```
 
 ## Changelog
+
+### Sin publicar (pendiente de asignar versión)
+
+**Added:**
+- ✨ `CloudApiGroupsContract` — WhatsApp Cloud API Groups nativo (Meta, Official Business Account): `createGroup()`, `deleteGroup()`, `group()`, `groups()`, `updateGroupSettings()`, `getGroupInviteLink()`, `resetGroupInviteLink()`, `sendGroupInviteTemplate()`, `removeGroupParticipant()`, `getGroupJoinRequests()`, `approveGroupJoinRequest()`, `rejectGroupJoinRequest()`. Implementado en `MetaClient`. Contrato deliberadamente separado de `GroupsContract` (ver sección "Grupos API oficial" arriba) — no lo implementan Z-API/UAZAPI/Funapi.
+- ⚠️ El body de `removeGroupParticipant()`/`approveGroupJoinRequest()`/`rejectGroupJoinRequest()` sigue la convención habitual de Meta (`participants: [{user|user_id}]`) pero no está confirmado contra la referencia completa del Graph API — validar contra un número real antes de depender de esto en producción.
 
 ### v0.3.0 - 2025-XX-XX (En desarrollo)
 
