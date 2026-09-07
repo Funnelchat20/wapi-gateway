@@ -796,6 +796,27 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return is_array($chats) ? $chats : [];
     }
 
+    /**
+     * Not supported by UAZAPI, and not needed here.
+     *
+     * UAZAPI exposes no single-chat read: `chats()` is a filtered POST listing,
+     * and there is no per-id equivalent. More importantly, the problem this
+     * method exists to solve (communities #1238) does not exist on this
+     * provider: `groupMetadata()` here delegates to `group()`, whose
+     * `Uazapi\GroupResource` already maps `PictureUrl` to `image`, so the
+     * group picture arrives in the metadata response itself. Callers should
+     * read `image` from `groupMetadata()` and only fall back to `chat()` on
+     * providers that omit it (z-api, funapi).
+     *
+     * Follows the same explicit-error convention as `acceptGroupInvitation()`
+     * rather than returning an empty array, so a caller cannot mistake
+     * "unsupported" for "this chat has no picture".
+     */
+    public function chat(string $uid, string $token, string $chatId): array
+    {
+        return ['error' => 'chat is not supported by UAZAPI provider'];
+    }
+
     public function deleteChat(string $uid, string $token, string $phone): array
     {
         $url = config('uazapi.base_url') . config('uazapi.endpoints.delete_chat');
