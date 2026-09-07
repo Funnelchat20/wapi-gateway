@@ -27,6 +27,33 @@ interface GroupsContract
     public function updateCommunityDescription(string $uid, string $token, string $id, string $description): array;
     public function groupInvitationMetadata(string $uid, string $token, string $url): array;
     public function chats(string $uid, string $token, array $options = []): array;
+
+    /**
+     * Fetch a SINGLE chat's metadata by its provider-side chat id.
+     *
+     * `$chatId` is passed through verbatim, so the caller supplies whatever
+     * form the provider expects — a bare phone for a 1:1 chat, or the
+     * `{groupId}-group` form for a group. This is deliberate: unlike
+     * `groupMetadata()`, which appends `-group` itself, this method is not
+     * group-specific and must not assume a suffix.
+     *
+     * Motivation (communities issue #1238): `group-metadata` does NOT return
+     * the group's profile picture under any field name — verified across
+     * 531,827 successful production responses. The picture only ever came from
+     * this endpoint, as `profileThumbnail`. `group()` already performs that
+     * second call internally, but it funnels the result through
+     * `GroupResource`, which flattens participants to bare phones and drops
+     * `lid` and `suspended` — both load-bearing for consumers. This method
+     * exposes the chat read on its own so a caller can enrich a
+     * `groupMetadata()` response without losing anything.
+     *
+     * Returns the provider's raw payload (same convention as `chats()`), or
+     * `['error' => string]`. Note that `profileThumbnail` URLs are short-lived
+     * (~9 days, per the `oe` query parameter): re-host the image, do not
+     * persist the URL.
+     */
+    public function chat(string $uid, string $token, string $chatId): array;
+
     public function deleteChat(string $uid, string $token, string $phone): array;
     public function deleteMessage(string $uid, string $token, string $messageId, string $phone, bool $owner): array;
     public function deleteMessagesConcurrently(string $uid, string $token, array $deleteRequests): array;

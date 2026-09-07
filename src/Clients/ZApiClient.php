@@ -1062,6 +1062,24 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return $res->json();
     }
 
+    /**
+     * See `GroupsContract::chat()`. `$chatId` is used verbatim — for a group
+     * the caller passes `{groupId}-group`, the same form `groupMetadata()`
+     * builds internally.
+     *
+     * Inherited unchanged by `ZApiLiteClient` and `FunapiClient`: both only
+     * override `$configPrefix`, and `baseUrl()` derives from it.
+     */
+    public function chat(string $uid, string $token, string $chatId): array
+    {
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'chats/' . $chatId], $this->baseUrl());
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->get($url);
+        $this->logRequest('chat', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
     public function deleteChat(string $uid, string $token, string $phone): array
     {
         $startTime = microtime(true);

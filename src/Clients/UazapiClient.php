@@ -796,6 +796,31 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return is_array($chats) ? $chats : [];
     }
 
+    /**
+     * Not supported by UAZAPI: it exposes no single-chat read. `chats()` is a
+     * filtered POST listing with no per-id equivalent.
+     *
+     * Follows the same explicit-error convention as `acceptGroupInvitation()`
+     * rather than returning an empty array, so a caller cannot mistake
+     * "unsupported" for "this chat has no picture".
+     *
+     * Note on the group picture for this provider, since it is easy to get
+     * wrong: `group()` here returns the provider payload RAW (the only
+     * Resource this client applies is `CreateGroupResource`, in
+     * `createGroup()`). The `PictureUrl` -> `image` mapping lives in
+     * `Http\Resources\Uazapi\GroupResource`, which is applied by
+     * `UazapiController` — the gateway's own HTTP surface — not by this
+     * client. So a client-side caller would receive `PictureUrl`, capitalised,
+     * and only if the provider includes it. Also note that `GatewayManager`
+     * resolves clients through an exhaustive `match` over `ProviderEnum`
+     * (`ZApi`, `WhatsAppCloud`, `FunApi`, `ZApiLite`) that never returns this
+     * client, so today it is reachable only via `UazapiController`.
+     */
+    public function chat(string $uid, string $token, string $chatId): array
+    {
+        return ['error' => 'chat is not supported by UAZAPI provider'];
+    }
+
     public function deleteChat(string $uid, string $token, string $phone): array
     {
         $url = config('uazapi.base_url') . config('uazapi.endpoints.delete_chat');
