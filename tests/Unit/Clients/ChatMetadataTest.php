@@ -161,10 +161,14 @@ class ChatMetadataTest extends TestCase
     }
 
     /**
-     * UAZAPI has no single-chat read and does not need one — its
-     * `groupMetadata()` already returns `image`. It must say so explicitly
-     * rather than return an empty array, which a caller could misread as
-     * "this chat has no picture".
+     * UAZAPI has no single-chat read. It must say so explicitly rather than
+     * return an empty array, which a caller could misread as "this chat has
+     * no picture".
+     *
+     * It is NOT the case that this provider gets the picture for free from
+     * `groupMetadata()`: its `group()` returns the payload raw, and the
+     * `PictureUrl` -> `image` mapping belongs to `UazapiController`, not to
+     * this client.
      */
     public function test_uazapi_reports_unsupported_without_calling_out(): void
     {

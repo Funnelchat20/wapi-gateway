@@ -797,20 +797,24 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
     }
 
     /**
-     * Not supported by UAZAPI, and not needed here.
-     *
-     * UAZAPI exposes no single-chat read: `chats()` is a filtered POST listing,
-     * and there is no per-id equivalent. More importantly, the problem this
-     * method exists to solve (communities #1238) does not exist on this
-     * provider: `groupMetadata()` here delegates to `group()`, whose
-     * `Uazapi\GroupResource` already maps `PictureUrl` to `image`, so the
-     * group picture arrives in the metadata response itself. Callers should
-     * read `image` from `groupMetadata()` and only fall back to `chat()` on
-     * providers that omit it (z-api, funapi).
+     * Not supported by UAZAPI: it exposes no single-chat read. `chats()` is a
+     * filtered POST listing with no per-id equivalent.
      *
      * Follows the same explicit-error convention as `acceptGroupInvitation()`
      * rather than returning an empty array, so a caller cannot mistake
      * "unsupported" for "this chat has no picture".
+     *
+     * Note on the group picture for this provider, since it is easy to get
+     * wrong: `group()` here returns the provider payload RAW (the only
+     * Resource this client applies is `CreateGroupResource`, in
+     * `createGroup()`). The `PictureUrl` -> `image` mapping lives in
+     * `Http\Resources\Uazapi\GroupResource`, which is applied by
+     * `UazapiController` — the gateway's own HTTP surface — not by this
+     * client. So a client-side caller would receive `PictureUrl`, capitalised,
+     * and only if the provider includes it. Also note that `GatewayManager`
+     * resolves clients through an exhaustive `match` over `ProviderEnum`
+     * (`ZApi`, `WhatsAppCloud`, `FunApi`, `ZApiLite`) that never returns this
+     * client, so today it is reachable only via `UazapiController`.
      */
     public function chat(string $uid, string $token, string $chatId): array
     {
