@@ -1350,6 +1350,50 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return MessageResource::make($res->json());
     }
 
+    /**
+     * React to an existing message, or withdraw the reaction when `$reaction`
+     * is blank — see {@see MessagesContract::sendReaction()} for the semantics.
+     *
+     * Z-API splits the two directions across two endpoints (`send-reaction` and
+     * `send-remove-reaction`), and the remove payload carries no `reaction`
+     * key at all, so the emoji is withheld rather than sent empty.
+     *
+     * Inherited unchanged by ZApiLite and FunapiClient: whatsgo mirrors the
+     * Z-API REST surface 1:1 under its own base_url, so `$this->configPrefix`
+     * resolves the right host and client token. Whether whatsgo actually
+     * implements these two endpoints is NOT verified — if it does not, the call
+     * degrades to a classified error, never to a silent success.
+     *
+     * @param  array{delayMessage?: int}  $options
+     */
+    public function sendReaction(string $uid, string $token, string $to, string $messageId, string $reaction, array $options = []): array
+    {
+        $startTime = microtime(true);
+        $removing = trim($reaction) === '';
+        $action = $removing ? 'send-remove-reaction' : 'send-reaction';
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, $action], $this->baseUrl());
+
+        $payload = ['phone' => $to, 'messageId' => $messageId];
+        if (! $removing) $payload['reaction'] = $reaction;
+        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
+            ->timeout(config("$this->configPrefix.timeout", 60))
+            ->post($url, $payload);
+
+        $context = ['phone' => $to, 'removing' => $removing];
+
+        if ($res->failed() || $res->json('error')) {
+            $error = $this->formatError($res->json('error', 'error'));
+            $context['error'] = $error;
+            $this->logRequest('sendReaction', $uid, $context, $startTime, $res, $url, $payload);
+            return ['error' => $error];
+        }
+
+        $this->logRequest('sendReaction', $uid, $context, $startTime, $res, $url, $payload);
+        return MessageResource::make($res->json());
+    }
+
     public function pinMessage(string $uid, string $token, string $phone, string $messageId, string $duration): array
     {
         $startTime = microtime(true);

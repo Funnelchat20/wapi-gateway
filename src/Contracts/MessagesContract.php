@@ -34,6 +34,11 @@ namespace Funnelchat\WapiGateway\Contracts;
  * funapi honor it; Meta and Uazapi silently ignore it. Meta needs a different wire
  * shape (`context.message_id`) and is not covered because WhatsApp Cloud API has no
  * group support, which is the only consumer so far. Uazapi is untested.
+ *
+ * `sendReaction` acts on an existing message rather than producing a new one, and
+ * is likewise limited to the z-api family (z-api, ZApiLite, funapi). Meta and Uazapi
+ * return an explicit unsupported error instead of a silent no-op, because a reaction
+ * that never reaches WhatsApp must not read as success to the caller.
  */
 interface MessagesContract
 {
@@ -49,6 +54,22 @@ interface MessagesContract
     public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array;
     public function sendPtv(string $uid, string $token, string $to, string $videoUrl, array $options = []): array;
     public function pinMessage(string $uid, string $token, string $phone, string $messageId, string $duration): array;
+    /**
+     * React to an existing message with an emoji, or withdraw that reaction.
+     *
+     * WhatsApp keeps a single reaction per sender per message, so sending a new
+     * emoji replaces the previous one — the call is idempotent by nature and
+     * needs no read-before-write. A blank `$reaction` means "remove my
+     * reaction": the same blank-value idiom as the `messageId` quote option
+     * above, and the same convention WhatsApp itself uses inbound, where a
+     * withdrawn reaction arrives as an empty `value`.
+     *
+     * `$to` is a chat phone or a group id, so groups work unchanged. The
+     * reacted message's own type is irrelevant — `$messageId` is opaque.
+     *
+     * @param  array{delayMessage?: int}  $options
+     */
+    public function sendReaction(string $uid, string $token, string $to, string $messageId, string $reaction, array $options = []): array;
     /**
      * Display a typing indicator. For Meta Cloud this is attached to the
      * mark-as-read call for an inbound message, so $messageId is the wamid of a
