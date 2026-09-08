@@ -33,6 +33,7 @@ class MetaClientCloudApiGroupsTest extends TestCase
         ]);
     }
 
+    /** Field names confirmed against a real Cloud API Groups call (staging, 2026-09-08) — see MetaClient::createGroup(). */
     public function test_creates_a_group_with_just_a_name(): void
     {
         $this->fakeGraph();
@@ -41,10 +42,10 @@ class MetaClientCloudApiGroupsTest extends TestCase
 
         Http::assertSent(fn($request) => $request->method() === 'POST'
             && str_contains($request->url(), self::WABA . '/groups')
-            && $request->data() === ['name' => 'Clientes VIP CDMX']);
+            && $request->data() === ['messaging_product' => 'whatsapp', 'subject' => 'Clientes VIP CDMX']);
     }
 
-    /** $options is a pass-through bag, not named params — Meta's accepted creation fields beyond `name` are unconfirmed. */
+    /** $options is a pass-through bag, not named params — Meta's accepted creation fields beyond `subject` are unconfirmed. */
     public function test_creates_a_group_forwards_extra_options_alongside_name(): void
     {
         $this->fakeGraph();
@@ -52,7 +53,8 @@ class MetaClientCloudApiGroupsTest extends TestCase
         (new MetaClient())->createGroup(self::WABA, 'TOKEN', 'Clientes VIP CDMX', ['description' => 'Soporte prioritario']);
 
         Http::assertSent(fn($request) => $request->data() === [
-            'name' => 'Clientes VIP CDMX',
+            'messaging_product' => 'whatsapp',
+            'subject' => 'Clientes VIP CDMX',
             'description' => 'Soporte prioritario',
         ]);
     }

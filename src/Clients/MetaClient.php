@@ -697,10 +697,16 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             : ['user' => $participant];
     }
 
+    /**
+     * Confirmed against a real Cloud API Groups call (staging, 2026-09-08):
+     * Meta rejected a payload keyed `name` with "missing: 'messaging_product',
+     * missing: 'subject'" — the group's title is `subject`, not `name`, and
+     * `messaging_product` is required here too, not just on /messages.
+     */
     public function createGroup(string $uid, string $token, string $name, array $options = []): array
     {
         $startTime = microtime(true);
-        $payload = array_merge(['name' => $name], $options);
+        $payload = array_merge(['messaging_product' => 'whatsapp', 'subject' => $name], $options);
         $url = $this->groupsUrl($uid . '/groups');
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
@@ -759,6 +765,12 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return $res->json();
     }
 
+    /**
+     * $settings is passed through verbatim — its field names (e.g. whether the
+     * description key matches createGroup()'s `subject` naming convention) are
+     * NOT confirmed against a real call the way createGroup()'s was; validate
+     * before relying on this against production.
+     */
     public function updateGroupSettings(string $uid, string $token, string $groupId, array $settings): array
     {
         $startTime = microtime(true);
