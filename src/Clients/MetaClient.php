@@ -436,43 +436,39 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     /**
      * Cloud API models a reaction as a message of its own: `type: reaction`
-     * with the target's wamid and the emoji. $phone is the chat, $messageId
+     * carrying the target's wamid and the emoji. $to is the chat, $messageId
      * the wamid of the message being reacted to.
      *
-     * An empty emoji is Meta's removal signal, so a blank one is refused here
-     * rather than forwarded — otherwise "react" would quietly remove the
-     * user's reaction instead of failing the way z-api does.
-     * {@see self::removeReaction()} is the explicit way to clear it.
+     * A blank emoji is Meta's own removal signal, which is exactly the contract
+     * the z-api family implements by routing to send-remove-reaction — so the
+     * blank is normalized and passed through rather than refused. Whitespace
+     * counts as blank: Meta would reject "   " as an invalid emoji, and the
+     * caller meant "remove".
+     *
+     * Contrary to what this client assumed while reactions were unwired, Cloud
+     * API is not limited to 1:1 here — Meta shipped group messaging in 2026
+     * (`recipient_type: group`), so the group case that motivated reactions is
+     * reachable. `recipientField()` already routes a BSUID correctly.
      */
-    public function sendReaction(string $uid, string $token, string $phone, string $messageId, string $reaction, array $options = []): array
-    {
-        if (trim($reaction) === '') return ['error' => 'Reaction emoji is required'];
-
-        return $this->react($uid, $token, $phone, $messageId, $reaction, 'sendReaction');
-    }
-
-    /** Same message type with an empty `emoji` — Meta reads that as "clear it". */
-    public function removeReaction(string $uid, string $token, string $phone, string $messageId, array $options = []): array
-    {
-        return $this->react($uid, $token, $phone, $messageId, '', 'removeReaction');
-    }
-
-    private function react(string $uid, string $token, string $phone, string $messageId, string $emoji, string $operation): array
+    public function sendReaction(string $uid, string $token, string $to, string $messageId, string $reaction, array $options = []): array
     {
         $startTime = microtime(true);
+        $emoji = trim($reaction) === '' ? '' : $reaction;
         $payload = [
             'messaging_product' => 'whatsapp',
-            ...$this->recipientField($phone),
+            ...$this->recipientField($to),
             'type' => 'reaction',
             'reaction' => ['message_id' => $messageId, 'emoji' => $emoji],
         ];
-        $url = $this->messagesUrl($uid, $phone);
+        $url = $this->messagesUrl($uid, $to);
         $res = Http::withToken($token)->post($url, $payload);
+        $context = ['phone' => $to, 'removing' => $emoji === ''];
         if ($res->failed()) {
-            $this->logRequest($operation, $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $phone], $startTime, $res, $url, $payload);
-            return $this->sendError($res, $phone);
+            $context['error'] = $res->json('error', 'Failed to send');
+            $this->logRequest('sendReaction', $uid, $context, $startTime, $res, $url, $payload);
+            return $this->sendError($res, $to);
         }
-        $this->logRequest($operation, $uid, ['phone' => $phone], $startTime, $res, $url, $payload);
+        $this->logRequest('sendReaction', $uid, $context, $startTime, $res, $url, $payload);
         return MessageResource::make($res->json());
     }
 

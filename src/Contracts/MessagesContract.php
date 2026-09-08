@@ -52,6 +52,11 @@ namespace Funnelchat\WapiGateway\Contracts;
  * rejected, so the quote degrades silently. And quoting inside a group send (Groups
  * API, 2026) is not documented by Meta and has not been verified against a real
  * WABA; 1:1 is.
+ *
+ * `sendReaction` acts on an existing message rather than producing a new one, so
+ * it is not part of the table above. Unlike the quote option, every provider
+ * honors it — the four wire shapes and the meaning of a blank emoji live in that
+ * method's own docblock.
  */
 interface MessagesContract
 {
@@ -91,37 +96,39 @@ interface MessagesContract
     public function forwardMessage(string $uid, string $token, string $to, string $messageId, string $sourceChat, array $options = []): array;
 
     /**
-     * React to a message with an emoji, and clear that reaction again.
+     * React to an existing message with an emoji, or withdraw that reaction.
      *
-     * $messageId is the provider's id for the message being reacted to, $phone
-     * the chat it lives in. WhatsApp keeps a single reaction per sender per
-     * message, so sendReaction on an already-reacted message replaces the emoji
-     * rather than adding one — there is no "react twice".
+     * WhatsApp keeps a single reaction per sender per message, so sending a new
+     * emoji replaces the previous one — the call is idempotent by nature and
+     * needs no read-before-write. A blank `$reaction` means "remove my
+     * reaction": the same blank-value idiom as the `messageId` quote option
+     * above, and the same convention WhatsApp itself uses inbound, where a
+     * withdrawn reaction arrives as an empty `value`.
      *
-     * Every provider supports both operations; only the wire differs:
+     * `$to` is a chat phone or a group id, so groups work unchanged. The
+     * reacted message's own type is irrelevant — `$messageId` is opaque.
      *
-     *   z-api / ZApiLite / funapi — two endpoints, send-reaction {phone,
-     *     messageId, reaction} and send-remove-reaction {phone, messageId}.
-     *     Both take an optional `delayMessage` (1-15s) via $options.
+     * All four providers honor it, each with its own wire, and the blank always
+     * means the same thing:
+     *
+     *   z-api / ZApiLite / funapi — two endpoints. A blank routes to
+     *     send-remove-reaction {phone, messageId}, anything else to
+     *     send-reaction, which adds `reaction`.
      *   Uazapi — one endpoint, /message/react {number, text, id}, where `text`
-     *     is the emoji and an empty `text` performs the removal.
+     *     carries the emoji and an empty `text` is itself the removal.
      *   Meta — a message of its own: `type: reaction` with
-     *     `reaction: {message_id, emoji}`, and an empty `emoji` removes.
-     *
-     * Because two of the four providers overload "empty emoji" as the removal,
-     * a blank $reaction is refused by sendReaction instead of being forwarded:
-     * otherwise the same call would delete the user's reaction on Meta/Uazapi
-     * and fail on z-api. removeReaction is the only way to clear one.
+     *     `reaction: {message_id, emoji}`, an empty `emoji` being the removal.
      *
      * funapi honors one extra option, `sender`: the JID of whoever sent the
      * message being reacted to. The bridge needs it to build the reaction and
-     * falls back to the chat JID when absent, which is correct for a 1:1 but
-     * not for a group — reacting to another participant's message without it
-     * silently lands on nothing. z-api resolves the sender server-side and
-     * ignores the option.
+     * falls back to the chat JID when absent, which is right for a 1:1 and
+     * wrong for a group — reacting to another participant's message without it
+     * lands on nothing without erroring. z-api resolves the sender server-side
+     * and ignores the option.
+     *
+     * @param  array{delayMessage?: int, sender?: string}  $options
      */
-    public function sendReaction(string $uid, string $token, string $phone, string $messageId, string $reaction, array $options = []): array;
-    public function removeReaction(string $uid, string $token, string $phone, string $messageId, array $options = []): array;
+    public function sendReaction(string $uid, string $token, string $to, string $messageId, string $reaction, array $options = []): array;
     /**
      * Display a typing indicator. For Meta Cloud this is attached to the
      * mark-as-read call for an inbound message, so $messageId is the wamid of a

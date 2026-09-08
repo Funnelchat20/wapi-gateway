@@ -825,6 +825,31 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return is_array($chats) ? $chats : [];
     }
 
+    /**
+     * Not supported by UAZAPI: it exposes no single-chat read. `chats()` is a
+     * filtered POST listing with no per-id equivalent.
+     *
+     * Follows the same explicit-error convention as `acceptGroupInvitation()`
+     * rather than returning an empty array, so a caller cannot mistake
+     * "unsupported" for "this chat has no picture".
+     *
+     * Note on the group picture for this provider, since it is easy to get
+     * wrong: `group()` here returns the provider payload RAW (the only
+     * Resource this client applies is `CreateGroupResource`, in
+     * `createGroup()`). The `PictureUrl` -> `image` mapping lives in
+     * `Http\Resources\Uazapi\GroupResource`, which is applied by
+     * `UazapiController` — the gateway's own HTTP surface — not by this
+     * client. So a client-side caller would receive `PictureUrl`, capitalised,
+     * and only if the provider includes it. Also note that `GatewayManager`
+     * resolves clients through an exhaustive `match` over `ProviderEnum`
+     * (`ZApi`, `WhatsAppCloud`, `FunApi`, `ZApiLite`) that never returns this
+     * client, so today it is reachable only via `UazapiController`.
+     */
+    public function chat(string $uid, string $token, string $chatId): array
+    {
+        return ['error' => 'chat is not supported by UAZAPI provider'];
+    }
+
     public function deleteChat(string $uid, string $token, string $phone): array
     {
         $url = config('uazapi.base_url') . config('uazapi.endpoints.delete_chat');
@@ -979,36 +1004,29 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
     }
 
     /**
-     * UAZAPI has one endpoint for both operations: /message/react carries the
-     * emoji in `text`, and an empty `text` is what removes the reaction
-     * ({@see self::removeReaction()}).
+     * One endpoint covers both directions here: /message/react carries the
+     * emoji in `text`, and an empty `text` IS the removal — the same meaning a
+     * blank carries on every other provider, so it is passed straight through.
+     * Whitespace is normalized to empty: the caller meant "remove", and the
+     * provider would take "   " as an emoji.
      *
-     * That overload is exactly why a blank emoji is refused here instead of
-     * being forwarded: on z-api the same call fails loudly, so letting it
-     * through would mean "react" silently deletes the user's reaction on one
-     * provider and errors on another.
+     * Unlike the z-api family there is no second endpoint to route to, so the
+     * blank never changes the URL, only the payload.
      */
-    public function sendReaction(string $uid, string $token, string $phone, string $messageId, string $reaction, array $options = []): array
-    {
-        if (trim($reaction) === '') return ['error' => 'Reaction emoji is required'];
-
-        return $this->react($uid, $token, $phone, $messageId, $reaction, 'sendReaction');
-    }
-
-    /** The same endpoint with an empty `text`: WhatsApp models a removal as an empty reaction. */
-    public function removeReaction(string $uid, string $token, string $phone, string $messageId, array $options = []): array
-    {
-        return $this->react($uid, $token, $phone, $messageId, '', 'removeReaction');
-    }
-
-    private function react(string $uid, string $token, string $phone, string $messageId, string $emoji, string $operation): array
+    public function sendReaction(string $uid, string $token, string $to, string $messageId, string $reaction, array $options = []): array
     {
         $startTime = microtime(true);
+        $emoji = trim($reaction) === '' ? '' : $reaction;
         $url = config('uazapi.base_url') . config('uazapi.endpoints.send_reaction');
-        $payload = ['number' => $phone, 'text' => $emoji, 'id' => $messageId];
+        $payload = ['number' => $to, 'text' => $emoji, 'id' => $messageId];
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 60))->asJson()->post($url, $payload);
-        $this->logRequest($operation, $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error'), 'phone' => $phone] : ['phone' => $phone], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error'))];
+        $context = ['phone' => $to, 'removing' => $emoji === ''];
+        if ($res->failed() || $res->json('error')) {
+            $context['error'] = $res->json('error');
+            $this->logRequest('sendReaction', $uid, $context, $startTime, $res, $url, $payload);
+            return ['error' => $this->formatError($res->json('error'))];
+        }
+        $this->logRequest('sendReaction', $uid, $context, $startTime, $res, $url, $payload);
         return $res->json();
     }
 

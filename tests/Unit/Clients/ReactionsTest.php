@@ -6,22 +6,20 @@ use Funnelchat\WapiGateway\Clients\FunapiClient;
 use Funnelchat\WapiGateway\Clients\MetaClient;
 use Funnelchat\WapiGateway\Clients\UazapiClient;
 use Funnelchat\WapiGateway\Clients\ZApiClient;
-use Funnelchat\WapiGateway\Clients\ZApiLiteClient;
 use Funnelchat\WapiGateway\Providers\WapiServiceProvider;
 use Illuminate\Support\Facades\Http;
 use Orchestra\Testbench\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
- * Reacting is one operation with four wire shapes: z-api and funapi split it
- * across send-reaction / send-remove-reaction, while Uazapi and Meta use a
- * single call whose emoji field doubles as the removal when left empty. The
- * shapes are pinned per provider because nothing at runtime distinguishes a
- * reaction that never landed from one that did — both come back 200.
+ * Companion to SendReactionTest, which owns the z-api family's two-endpoint
+ * routing. This file covers what that one cannot: the providers whose wire is
+ * shaped differently, and funapi's extra payload field.
  *
- * The blank-emoji guard gets the most coverage here on purpose: it is the one
- * place where forwarding the caller's value verbatim would mean the same call
- * removes a reaction on two providers and errors on the other two.
+ * The contract is one method where a blank emoji withdraws the reaction. That
+ * reads as three different things on the wire — a different endpoint on z-api,
+ * an empty `text` on Uazapi, an empty `emoji` on Meta — and all three come back
+ * 200 whether or not the removal actually took, so each is pinned here.
  */
 class ReactionsTest extends TestCase
 {
@@ -45,13 +43,12 @@ class ReactionsTest extends TestCase
         config([
             'zapi.base_url' => 'https://zapi.example.com',
             'zapi.client_token' => 'zapi-client-token',
-            // ZApiLiteClient reads the `zapi-lite` prefix, not `zapilite`.
-            'zapi-lite.base_url' => 'https://zapilite.example.com',
-            'zapi-lite.client_token' => 'zapilite-client-token',
             'funapi.base_url' => 'https://funapi.example.com',
             'funapi.client_token' => 'funapi-client-token',
         ]);
 
+        // The shipped endpoint map, not a hand-written copy: which UAZAPI URL a
+        // reaction lands on is part of what is being asserted.
         config(['uazapi' => require dirname(__DIR__, 3) . '/config/uazapi.php']);
         config(['uazapi.base_url' => 'https://uazapi.example.com']);
 
@@ -59,85 +56,65 @@ class ReactionsTest extends TestCase
     }
 
     /**
-     * z-api's wire, which funapi mirrors field for field.
+     * Blank in every shape a caller can produce it. Whitespace is included on
+     * purpose: it reaches the provider as an invalid emoji rather than as a
+     * removal unless the client normalizes it.
      *
-     * @return array<string, array{0: callable}>
+     * @return array<string, array{0: string}>
      */
-    public static function zapiShapedClients(): array
+    public static function blankEmojis(): array
     {
-        return [
-            'zapi' => [fn() => new ZApiClient()],
-            'zapilite' => [fn() => new ZApiLiteClient()],
-            'funapi' => [fn() => new FunapiClient()],
-        ];
+        return ['empty string' => [''], 'whitespace' => ['   ']];
     }
 
-    /** Every client, since all four implement both operations. */
-    public static function allClients(): array
+    public function test_uazapi_reacts_through_the_single_react_endpoint(): void
     {
-        return self::zapiShapedClients() + [
-            'uazapi' => [fn() => new UazapiClient()],
-            'meta' => [fn() => new MetaClient()],
-        ];
-    }
-
-    #[DataProvider('zapiShapedClients')]
-    public function test_zapi_shaped_send_reaction_posts_phone_message_id_and_emoji(callable $make): void
-    {
-        $make()->sendReaction('UID', 'TOKEN', self::PARTICIPANT, self::MESSAGE_ID, self::EMOJI);
+        (new UazapiClient())->sendReaction('UID', 'TOKEN', self::PARTICIPANT, self::MESSAGE_ID, self::EMOJI);
 
         Http::assertSent(function ($request) {
             $data = $request->data();
 
-            return str_contains($request->url(), 'send-reaction')
-                && $data['phone'] === self::PARTICIPANT
-                && $data['messageId'] === self::MESSAGE_ID
-                && $data['reaction'] === self::EMOJI;
+            return str_contains($request->url(), '/message/react')
+                && $data['number'] === self::PARTICIPANT
+                && $data['id'] === self::MESSAGE_ID
+                && $data['text'] === self::EMOJI;
         });
     }
 
-    /**
-     * The removal endpoint takes no emoji: there is only ever one reaction of
-     * ours on a message, so naming it would add nothing. Sending `reaction`
-     * anyway is pinned as wrong — it is the field the send endpoint validates,
-     * and leaking it here would hide a caller passing the wrong operation.
-     */
-    #[DataProvider('zapiShapedClients')]
-    public function test_zapi_shaped_remove_reaction_posts_no_emoji(callable $make): void
+    /** No second endpoint to route to: the blank changes the payload, not the URL. */
+    #[DataProvider('blankEmojis')]
+    public function test_uazapi_withdraws_with_an_empty_text_on_the_same_endpoint(string $blank): void
     {
-        $make()->removeReaction('UID', 'TOKEN', self::PARTICIPANT, self::MESSAGE_ID);
+        (new UazapiClient())->sendReaction('UID', 'TOKEN', self::PARTICIPANT, self::MESSAGE_ID, $blank);
+
+        Http::assertSent(fn($request) => str_contains($request->url(), '/message/react')
+            && $request->data()['text'] === ''
+            && $request->data()['id'] === self::MESSAGE_ID);
+    }
+
+    public function test_meta_sends_a_reaction_typed_message(): void
+    {
+        (new MetaClient())->sendReaction('WABA-ID', 'TOKEN', self::PARTICIPANT, self::MESSAGE_ID, self::EMOJI);
 
         Http::assertSent(function ($request) {
             $data = $request->data();
 
-            return str_contains($request->url(), 'send-remove-reaction')
-                && $data['phone'] === self::PARTICIPANT
-                && $data['messageId'] === self::MESSAGE_ID
-                && ! array_key_exists('reaction', $data);
+            return str_contains($request->url(), '/messages')
+                && $data['type'] === 'reaction'
+                && $data['reaction']['message_id'] === self::MESSAGE_ID
+                && $data['reaction']['emoji'] === self::EMOJI;
         });
     }
 
-    /** send-remove-reaction is its own endpoint, not send-reaction with a flag. */
-    public function test_remove_reaction_does_not_hit_the_send_endpoint(): void
+    /** Meta reads an empty `emoji` as the withdrawal — same type, same endpoint. */
+    #[DataProvider('blankEmojis')]
+    public function test_meta_withdraws_with_an_empty_emoji(string $blank): void
     {
-        (new ZApiClient())->removeReaction('UID', 'TOKEN', self::PARTICIPANT, self::MESSAGE_ID);
+        (new MetaClient())->sendReaction('WABA-ID', 'TOKEN', self::PARTICIPANT, self::MESSAGE_ID, $blank);
 
-        Http::assertSent(fn($request) => str_contains($request->url(), '/send-remove-reaction'));
-        Http::assertNotSent(fn($request) => str_ends_with($request->url(), '/send-reaction'));
-    }
-
-    #[DataProvider('zapiShapedClients')]
-    public function test_zapi_shaped_clients_forward_the_delay_option(callable $make): void
-    {
-        $client = $make();
-
-        $client->sendReaction('UID', 'TOKEN', self::PARTICIPANT, self::MESSAGE_ID, self::EMOJI, ['delayMessage' => 5]);
-        $client->removeReaction('UID', 'TOKEN', self::PARTICIPANT, self::MESSAGE_ID, ['delayMessage' => 5]);
-
-        Http::assertSent(fn($request) => str_contains($request->url(), 'send-reaction')
-            && ($request->data()['delayMessage'] ?? null) === 5);
-        Http::assertSent(fn($request) => str_contains($request->url(), 'send-remove-reaction')
-            && ($request->data()['delayMessage'] ?? null) === 5);
+        Http::assertSent(fn($request) => $request->data()['type'] === 'reaction'
+            && $request->data()['reaction']['emoji'] === ''
+            && $request->data()['reaction']['message_id'] === self::MESSAGE_ID);
     }
 
     /**
@@ -153,6 +130,21 @@ class ReactionsTest extends TestCase
         ]);
 
         Http::assertSent(fn($request) => ($request->data()['sender'] ?? null) === self::PARTICIPANT);
+    }
+
+    /**
+     * Withdrawing needs the sender just as much as reacting does — it is the
+     * same whatsmeow call with an empty emoji — so the field has to survive the
+     * switch to the remove endpoint.
+     */
+    public function test_funapi_forwards_the_sender_when_withdrawing_too(): void
+    {
+        (new FunapiClient())->sendReaction('UID', 'TOKEN', self::GROUP, self::MESSAGE_ID, '', [
+            'sender' => self::PARTICIPANT,
+        ]);
+
+        Http::assertSent(fn($request) => str_contains($request->url(), 'send-remove-reaction')
+            && ($request->data()['sender'] ?? null) === self::PARTICIPANT);
     }
 
     public function test_funapi_omits_a_blank_sender(): void
@@ -174,95 +166,5 @@ class ReactionsTest extends TestCase
         ]);
 
         Http::assertSent(fn($request) => ! array_key_exists('sender', $request->data()));
-    }
-
-    public function test_uazapi_reacts_through_the_single_react_endpoint(): void
-    {
-        (new UazapiClient())->sendReaction('UID', 'TOKEN', self::PARTICIPANT, self::MESSAGE_ID, self::EMOJI);
-
-        Http::assertSent(function ($request) {
-            $data = $request->data();
-
-            return str_contains($request->url(), '/message/react')
-                && $data['number'] === self::PARTICIPANT
-                && $data['id'] === self::MESSAGE_ID
-                && $data['text'] === self::EMOJI;
-        });
-    }
-
-    /** UAZAPI models the removal as the same call with an empty `text`. */
-    public function test_uazapi_removes_with_an_empty_text(): void
-    {
-        (new UazapiClient())->removeReaction('UID', 'TOKEN', self::PARTICIPANT, self::MESSAGE_ID);
-
-        Http::assertSent(fn($request) => str_contains($request->url(), '/message/react')
-            && $request->data()['text'] === ''
-            && $request->data()['id'] === self::MESSAGE_ID);
-    }
-
-    public function test_meta_sends_a_reaction_typed_message(): void
-    {
-        (new MetaClient())->sendReaction('WABA-ID', 'TOKEN', self::PARTICIPANT, self::MESSAGE_ID, self::EMOJI);
-
-        Http::assertSent(function ($request) {
-            $data = $request->data();
-
-            return str_contains($request->url(), '/messages')
-                && $data['type'] === 'reaction'
-                && $data['reaction']['message_id'] === self::MESSAGE_ID
-                && $data['reaction']['emoji'] === self::EMOJI;
-        });
-    }
-
-    /** Meta reads an empty `emoji` as "clear it" — same type, same endpoint. */
-    public function test_meta_removes_with_an_empty_emoji(): void
-    {
-        (new MetaClient())->removeReaction('WABA-ID', 'TOKEN', self::PARTICIPANT, self::MESSAGE_ID);
-
-        Http::assertSent(fn($request) => $request->data()['type'] === 'reaction'
-            && $request->data()['reaction']['emoji'] === ''
-            && $request->data()['reaction']['message_id'] === self::MESSAGE_ID);
-    }
-
-    /**
-     * The guard that keeps one call from meaning two things. On Meta and Uazapi
-     * a blank emoji IS the removal, so forwarding it would delete the user's
-     * reaction where the caller asked to add one; on z-api the same value is a
-     * server-side error. Refusing it in every client makes the operation mean
-     * the same thing everywhere, and does it without a round-trip.
-     *
-     * @param mixed $blank
-     */
-    #[DataProvider('blankEmojiCases')]
-    public function test_send_reaction_refuses_a_blank_emoji_without_calling_the_provider(callable $make, string $blank): void
-    {
-        $result = $make()->sendReaction('UID', 'TOKEN', self::PARTICIPANT, self::MESSAGE_ID, $blank);
-
-        $this->assertSame(['error' => 'Reaction emoji is required'], $result);
-        Http::assertNothingSent();
-    }
-
-    /**
-     * @return array<string, array{0: callable, 1: string}>
-     */
-    public static function blankEmojiCases(): array
-    {
-        $cases = [];
-        foreach (self::allClients() as $provider => [$make]) {
-            foreach (['empty string' => '', 'whitespace' => '   '] as $label => $blank) {
-                $cases["$provider / $label"] = [$make, $blank];
-            }
-        }
-
-        return $cases;
-    }
-
-    /** The guard belongs to sendReaction only: removing still sends. */
-    #[DataProvider('allClients')]
-    public function test_remove_reaction_is_never_blocked_by_the_blank_guard(callable $make): void
-    {
-        $make()->removeReaction('UID', 'TOKEN', self::PARTICIPANT, self::MESSAGE_ID);
-
-        Http::assertSentCount(1);
     }
 }

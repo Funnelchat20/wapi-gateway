@@ -1062,6 +1062,24 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return $res->json();
     }
 
+    /**
+     * See `GroupsContract::chat()`. `$chatId` is used verbatim — for a group
+     * the caller passes `{groupId}-group`, the same form `groupMetadata()`
+     * builds internally.
+     *
+     * Inherited unchanged by `ZApiLiteClient` and `FunapiClient`: both only
+     * override `$configPrefix`, and `baseUrl()` derives from it.
+     */
+    public function chat(string $uid, string $token, string $chatId): array
+    {
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'chats/' . $chatId], $this->baseUrl());
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->get($url);
+        $this->logRequest('chat', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
     public function deleteChat(string $uid, string $token, string $phone): array
     {
         $startTime = microtime(true);
@@ -1332,6 +1350,61 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return MessageResource::make($res->json());
     }
 
+    /**
+     * React to an existing message, or withdraw the reaction when `$reaction`
+     * is blank — see {@see MessagesContract::sendReaction()} for the semantics.
+     *
+     * Z-API splits the two directions across two endpoints (`send-reaction` and
+     * `send-remove-reaction`), and the remove payload carries no `reaction`
+     * key at all, so the emoji is withheld rather than sent empty.
+     *
+     * Inherited unchanged by ZApiLite and FunapiClient: whatsgo mirrors the
+     * Z-API REST surface 1:1 under its own base_url, so `$this->configPrefix`
+     * resolves the right host and client token. Whether whatsgo actually
+     * implements these two endpoints is NOT verified — if it does not, the call
+     * degrades to a classified error, never to a silent success.
+     *
+     * @param  array{delayMessage?: int}  $options
+     */
+    public function sendReaction(string $uid, string $token, string $to, string $messageId, string $reaction, array $options = []): array
+    {
+        $startTime = microtime(true);
+        $removing = trim($reaction) === '';
+        $action = $removing ? 'send-remove-reaction' : 'send-reaction';
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, $action], $this->baseUrl());
+
+        $payload = ['phone' => $to, 'messageId' => $messageId];
+        if (! $removing) $payload['reaction'] = $reaction;
+        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+        $payload = $this->decorateReactionPayload($payload, $options);
+
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
+            ->timeout(config("$this->configPrefix.timeout", 60))
+            ->post($url, $payload);
+
+        $context = ['phone' => $to, 'removing' => $removing];
+
+        if ($res->failed() || $res->json('error')) {
+            $error = $this->formatError($res->json('error', 'error'));
+            $context['error'] = $error;
+            $this->logRequest('sendReaction', $uid, $context, $startTime, $res, $url, $payload);
+            return ['error' => $error];
+        }
+
+        $this->logRequest('sendReaction', $uid, $context, $startTime, $res, $url, $payload);
+        return MessageResource::make($res->json());
+    }
+
+    /**
+     * Seam for subclasses that need extra fields on a reaction payload. Z-API
+     * needs none: it resolves who sent the reacted message server-side.
+     * {@see FunapiClient::decorateReactionPayload()} overrides this.
+     */
+    protected function decorateReactionPayload(array $payload, array $options): array
+    {
+        return $payload;
+    }
+
     public function pinMessage(string $uid, string $token, string $phone, string $messageId, string $duration): array
     {
         $startTime = microtime(true);
@@ -1360,51 +1433,6 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 60))->post($url, $payload);
         $this->logRequest('forwardMessage', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return $res->json();
-    }
-
-    /**
-     * React to a message with an emoji. The reaction is tied to the target by
-     * `messageId`, so it lands on that bubble rather than on the chat; the id
-     * is opaque to the provider, so any message type can be reacted to, in 1:1
-     * and in groups alike.
-     *
-     * WhatsApp keeps one reaction per sender per message, so reacting again
-     * replaces the previous emoji instead of stacking a second one — this is
-     * also how you change a reaction. {@see self::removeReaction()} clears it.
-     *
-     * A blank emoji is refused before the request rather than sent for z-api to
-     * reject: on Meta and Uazapi the same value means "remove", so refusing it
-     * everywhere keeps one meaning for one call across providers.
-     */
-    public function sendReaction(string $uid, string $token, string $phone, string $messageId, string $reaction, array $options = []): array
-    {
-        if (trim($reaction) === '') return ['error' => 'Reaction emoji is required'];
-
-        $startTime = microtime(true);
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-reaction'], $this->baseUrl());
-        $payload = ['phone' => $phone, 'messageId' => $messageId, 'reaction' => $reaction];
-        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
-        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 60))->post($url, $payload);
-        $this->logRequest('sendReaction', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error'), 'phone' => $phone] : ['phone' => $phone], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return $res->json();
-    }
-
-    /**
-     * Clear our own reaction from a message. Z-API exposes this as a separate
-     * endpoint that takes no emoji — there is only ever one reaction of ours to
-     * remove, so naming it would add nothing.
-     */
-    public function removeReaction(string $uid, string $token, string $phone, string $messageId, array $options = []): array
-    {
-        $startTime = microtime(true);
-        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-remove-reaction'], $this->baseUrl());
-        $payload = ['phone' => $phone, 'messageId' => $messageId];
-        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
-        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 60))->post($url, $payload);
-        $this->logRequest('removeReaction', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error'), 'phone' => $phone] : ['phone' => $phone], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }

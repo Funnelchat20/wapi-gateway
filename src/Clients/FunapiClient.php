@@ -860,43 +860,21 @@ class FunapiClient extends ZApiClient
     }
 
     /**
-     * Mirrors z-api's send-reaction wire ({@see ZApiClient::sendReaction()}),
-     * with one field z-api has no use for: `sender`.
+     * The reaction routing itself is inherited from ZApiClient — the bridge
+     * mirrors z-api's send-reaction / send-remove-reaction split, so only the
+     * payload needs widening.
      *
-     * The bridge builds the reaction from whatsmeow, which needs the JID of
-     * whoever sent the message being reacted to — not just the chat it lives
-     * in. In a 1:1 those are the same JID and the bridge defaults to the chat,
-     * but in a group they differ, so reacting to another participant's message
-     * needs `$options['sender']`. Omitting it there does not error: the
-     * reaction is built against the group JID and lands on nothing.
+     * `sender` is the field z-api has no use for. The bridge builds the
+     * reaction through whatsmeow, which needs the JID of whoever sent the
+     * message being reacted to, not just the chat it lives in. In a 1:1 they
+     * are the same JID and the bridge defaults to the chat; in a group they
+     * differ, so reacting to another participant's message without
+     * `$options['sender']` does not error — the reaction is built against the
+     * group JID and lands on nothing.
      */
-    public function sendReaction(string $uid, string $token, string $phone, string $messageId, string $reaction, array $options = []): array
+    protected function decorateReactionPayload(array $payload, array $options): array
     {
-        if (trim($reaction) === '') return ['error' => 'Reaction emoji is required'];
-
-        $startTime = microtime(true);
-        $url = $this->buildUrl($uid, $token, 'send-reaction');
-        $payload = ['phone' => $phone, 'messageId' => $messageId, 'reaction' => $reaction];
-        $payload = $this->applySenderOption($payload, $options);
-        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 60))->post($url, $payload);
-        $this->logRequest('sendReaction', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error'), 'phone' => $phone] : ['phone' => $phone], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return $res->json();
-    }
-
-    /** Same endpoint split as z-api; the bridge ignores `reaction` here. */
-    public function removeReaction(string $uid, string $token, string $phone, string $messageId, array $options = []): array
-    {
-        $startTime = microtime(true);
-        $url = $this->buildUrl($uid, $token, 'send-remove-reaction');
-        $payload = ['phone' => $phone, 'messageId' => $messageId];
-        $payload = $this->applySenderOption($payload, $options);
-        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 60))->post($url, $payload);
-        $this->logRequest('removeReaction', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error'), 'phone' => $phone] : ['phone' => $phone], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return $res->json();
+        return $this->applySenderOption($payload, $options);
     }
 
     /**
