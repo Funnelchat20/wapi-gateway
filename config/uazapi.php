@@ -38,6 +38,7 @@ return [
         'chats' => '/chat/find',
         'delete_chat' => '/chat/delete',
         'delete_message' => '/message/delete',
+        'send_reaction' => '/message/react',
         'create_community' => '/community/create',
         'communities' => '/group/list',
         'community_metadata' => '/group/info',

@@ -45,6 +45,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         $url = $base . config('uazapi.endpoints.send_message');
         $payload = ['number' => $to, 'text' => $text];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
+        $payload = $this->applyQuoteOption($payload, $options);
         $res = Http::withHeaders(['token' => $token])->timeout($timeout)->asJson()->post($url, $payload);
         if ($res->failed() || $res->json('error')) {
             $error = $this->formatError($res->json('message') ?? $res->json('error') ?? 'error');
@@ -345,6 +346,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         if (isset($options['caption'])) $payload['text'] = $options['caption'];
         if (isset($options['fileName']) && $type === 'document') $payload['docName'] = $options['fileName'];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
+        $payload = $this->applyQuoteOption($payload, $options);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.send_document');
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post($url, $payload);
         if ($res->failed() || $res->json('error')) {
@@ -363,6 +365,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         if (isset($options['name'])) $payload['name'] = $options['name'];
         if (isset($options['address'])) $payload['address'] = $options['address'];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
+        $payload = $this->applyQuoteOption($payload, $options);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.send_location');
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post($url, $payload);
         $this->logRequest('sendLocation', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
@@ -378,6 +381,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         $choices = array_map(fn($b) => ($b['label'] ?? '') . '|' . ($b['id'] ?? ''), $buttons);
         $payload = ['number' => $to, 'type' => 'button', 'text' => $message, 'choices' => $choices];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
+        $payload = $this->applyQuoteOption($payload, $options);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.send_buttons');
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post($url, $payload);
         $this->logRequest('sendButtons', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
@@ -392,6 +396,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         $startTime = microtime(true);
         $payload = ['number' => $to, 'type' => 'button', 'text' => $message, 'choices' => [$label . '|' . $url]];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
+        $payload = $this->applyQuoteOption($payload, $options);
         $endpointUrl = config('uazapi.base_url') . config('uazapi.endpoints.send_buttons');
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post($endpointUrl, $payload);
         $this->logRequest('sendButtonLink', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $endpointUrl, $payload);
@@ -412,6 +417,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         }
         $payload = ['number' => $to, 'type' => 'list', 'text' => $message, 'choices' => $choices, 'listButton' => $buttonLabel];
         if (isset($extra['delayMessage'])) $payload['delay'] = (int) $extra['delayMessage'];
+        $payload = $this->applyQuoteOption($payload, $extra);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.send_list');
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post($url, $payload);
         $this->logRequest('sendOptionList', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
@@ -427,6 +433,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         $payload = ['number' => $to, 'type' => 'poll', 'text' => $message, 'choices' => array_values($pollOptions)];
         if (isset($options['pollMaxOptions'])) $payload['selectableCount'] = (int) $options['pollMaxOptions'];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
+        $payload = $this->applyQuoteOption($payload, $options);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.send_poll');
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post($url, $payload);
         $this->logRequest('sendPoll', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
@@ -444,6 +451,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         if (isset($options['linkDescription'])) $payload['linkPreviewDescription'] = $options['linkDescription'];
         if (isset($options['image'])) $payload['linkPreviewImage'] = $options['image'];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
+        $payload = $this->applyQuoteOption($payload, $options);
         $url = config('uazapi.base_url') . config('uazapi.endpoints.send_link');
         $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 120))->asJson()->post($url, $payload);
         $this->logRequest('sendLink', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
@@ -469,6 +477,27 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
     public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
     {
         return ['error' => 'Not supported'];
+    }
+
+    /**
+     * Translate the `messageId` option into UAZAPI's quote param, `replyid`
+     * ("ID da mensagem para responder"). Every /send/* endpoint this client
+     * targets accepts it, audio included: audio ships through /send/media
+     * here, so there is no equivalent of z-api's send-audio carve-out
+     * {@see ZApiClient::QUOTE_UNSUPPORTED_ACTIONS}. /send/menu takes it too,
+     * which is why buttons, option lists and polls quote on UAZAPI while the
+     * same methods cannot on z-api.
+     *
+     * A blank value is dropped rather than forwarded so callers can pass a
+     * nullable field straight through without branching.
+     */
+    protected function applyQuoteOption(array $payload, array $options): array
+    {
+        $messageId = $options['messageId'] ?? null;
+        if (is_scalar($messageId) && trim((string) $messageId) !== '') {
+            $payload['replyid'] = (string) $messageId;
+        }
+        return $payload;
     }
 
     private function mapType(string $ext): string
@@ -879,6 +908,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         $url = config('uazapi.base_url') . config('uazapi.endpoints.send_contact');
         $payload = ['number' => $to, 'fullName' => $contactName, 'phoneNumber' => $contactPhone];
         if (isset($options['delayMessage'])) $payload['delay'] = (int) $options['delayMessage'];
+        $payload = $this->applyQuoteOption($payload, $options);
         $res = Http::withHeaders(['token' => $token])
             ->timeout(config('uazapi.timeout', 60))
             ->asJson()
@@ -957,9 +987,47 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return ['error' => 'pinMessage is not supported by UAZAPI provider'];
     }
 
+    /**
+     * UAZAPI cannot forward a message by id: its API has no endpoint that
+     * resolves an existing message and re-sends it. The `forward` boolean its
+     * /send/* endpoints accept is a different thing — it stamps a message the
+     * caller is composing with WhatsApp's "Forwarded" label, which needs the
+     * content in hand and produces a new message rather than a copy of one.
+     *
+     * Emulating the real operation would mean fetching the original through
+     * /message/find and re-sending it per content type, so it is refused here
+     * instead of half-done under a name that promises more.
+     */
+    public function forwardMessage(string $uid, string $token, string $to, string $messageId, string $sourceChat, array $options = []): array
+    {
+        return ['error' => 'forwardMessage is not supported by UAZAPI provider'];
+    }
+
+    /**
+     * One endpoint covers both directions here: /message/react carries the
+     * emoji in `text`, and an empty `text` IS the removal — the same meaning a
+     * blank carries on every other provider, so it is passed straight through.
+     * Whitespace is normalized to empty: the caller meant "remove", and the
+     * provider would take "   " as an emoji.
+     *
+     * Unlike the z-api family there is no second endpoint to route to, so the
+     * blank never changes the URL, only the payload.
+     */
     public function sendReaction(string $uid, string $token, string $to, string $messageId, string $reaction, array $options = []): array
     {
-        return ['error' => 'sendReaction is not supported by UAZAPI provider'];
+        $startTime = microtime(true);
+        $emoji = trim($reaction) === '' ? '' : $reaction;
+        $url = config('uazapi.base_url') . config('uazapi.endpoints.send_reaction');
+        $payload = ['number' => $to, 'text' => $emoji, 'id' => $messageId];
+        $res = Http::withHeaders(['token' => $token])->timeout(config('uazapi.timeout', 60))->asJson()->post($url, $payload);
+        $context = ['phone' => $to, 'removing' => $emoji === ''];
+        if ($res->failed() || $res->json('error')) {
+            $context['error'] = $res->json('error');
+            $this->logRequest('sendReaction', $uid, $context, $startTime, $res, $url, $payload);
+            return ['error' => $this->formatError($res->json('error'))];
+        }
+        $this->logRequest('sendReaction', $uid, $context, $startTime, $res, $url, $payload);
+        return $res->json();
     }
 
     public function sendTypingIndicator(string $uid, string $token, string $messageId): array

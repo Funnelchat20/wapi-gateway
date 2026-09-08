@@ -3,8 +3,6 @@
 namespace Funnelchat\WapiGateway\Tests\Unit\Clients;
 
 use Funnelchat\WapiGateway\Clients\FunapiClient;
-use Funnelchat\WapiGateway\Clients\MetaClient;
-use Funnelchat\WapiGateway\Clients\UazapiClient;
 use Funnelchat\WapiGateway\Clients\ZApiClient;
 use Funnelchat\WapiGateway\Clients\ZApiLiteClient;
 use Funnelchat\WapiGateway\Providers\WapiServiceProvider;
@@ -19,9 +17,9 @@ use PHPUnit\Framework\Attributes\DataProvider;
  * come back 200 and simply do nothing — so both branches are pinned here, along
  * with the absence of the `reaction` key on the remove payload.
  *
- * The unsupported providers are pinned too: they must report an error rather
- * than a silent success, because a reaction that never reaches WhatsApp and
- * reads as sent would show up in the UI as a reaction the group cannot see.
+ * Scope is the z-api family only. Meta and Uazapi implement the same contract
+ * with a different wire — no second endpoint, the blank rides in the payload —
+ * and are covered in ReactionsTest, which also owns funapi's `sender` field.
  */
 class SendReactionTest extends TestCase
 {
@@ -186,26 +184,4 @@ class SendReactionTest extends TestCase
         $this->assertSame(['error' => 'group_forbidden'], $result);
     }
 
-    /**
-     * @return array<string, array{0: callable}>
-     */
-    public static function unsupportedProviders(): array
-    {
-        return [
-            'meta' => [fn() => new MetaClient()],
-            'uazapi' => [fn() => new UazapiClient()],
-        ];
-    }
-
-    #[DataProvider('unsupportedProviders')]
-    public function test_unsupported_providers_report_an_error_and_call_nothing(callable $make): void
-    {
-        Http::fake();
-
-        $result = $make()->sendReaction('UID', 'TOKEN', self::GROUP, self::MESSAGE_ID, self::EMOJI);
-
-        $this->assertArrayHasKey('error', $result);
-        $this->assertArrayNotHasKey('sent', $result);
-        Http::assertNothingSent();
-    }
 }

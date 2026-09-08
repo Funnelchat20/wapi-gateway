@@ -24,21 +24,39 @@ namespace Funnelchat\WapiGateway\Contracts;
  * The quoted message's own type does not matter: the id is opaque to the provider,
  * so a text reply can quote an image. A blank value is treated as "no quote".
  *
- * Honored by: sendText, sendFile, sendLocation, sendLink, sendContact, sendPtv.
- * Ignored by: sendPoll, sendOptionList, sendButtons, sendButtonLink, sendEvent —
- * the underlying z-api endpoints do not accept the param. sendFile is partial: it
- * routes per file extension and send-audio is the one target that does not take it,
- * so quoting an audio reply is silently skipped (see ZApiClient::QUOTE_UNSUPPORTED_ACTIONS).
+ * The option is uniform; what each provider does with it is not. The wire field
+ * differs — z-api/funapi `messageId`, Uazapi `replyid`, Meta `context.message_id` —
+ * and so does the set of sends that can carry it, because the provider's endpoints
+ * decide, not this contract:
  *
- * NOT provider-agnostic — only z-api (and therefore ZApiLite, which extends it) and
- * funapi honor it; Meta and Uazapi silently ignore it. Meta needs a different wire
- * shape (`context.message_id`) and is not covered because WhatsApp Cloud API has no
- * group support, which is the only consumer so far. Uazapi is untested.
+ *   z-api / ZApiLite / funapi — sendText, sendFile, sendLocation, sendLink,
+ *     sendContact, sendPtv. sendFile is partial: it routes per file extension and
+ *     send-audio is the one target that does not document the param, so quoting an
+ *     audio reply is silently skipped (see ZApiClient::QUOTE_UNSUPPORTED_ACTIONS).
+ *     sendPoll, sendOptionList, sendButtons, sendButtonLink and sendEvent cannot
+ *     quote — those endpoints do not accept it.
+ *   Uazapi — sendText, sendFile (audio included, it goes out through /send/media
+ *     like every other file), sendLocation, sendContact, sendLink, sendButtons,
+ *     sendButtonLink, sendOptionList and sendPoll: the last four ride /send/menu,
+ *     which documents `replyid`, so they quote here even though their z-api
+ *     counterparts cannot. sendEvent inherits it by composing a sendText; sendPtv
+ *     is unsupported by the provider altogether.
+ *   Meta — every send it implements: sendText, sendFile, sendLocation, sendContact,
+ *     sendLink, sendButtons, sendButtonLink, sendOptionList. `context` belongs to
+ *     the Cloud API's base message properties, so one shape covers every `type`.
+ *     sendTemplate is out only because its signature carries no options bag;
+ *     sendPoll, sendEvent and sendPtv are unsupported by the provider.
  *
- * `sendReaction` acts on an existing message rather than producing a new one, and
- * is likewise limited to the z-api family (z-api, ZApiLite, funapi). Meta and Uazapi
- * return an explicit unsupported error instead of a silent no-op, because a reaction
- * that never reaches WhatsApp must not read as success to the caller.
+ * Two Meta-only caveats. It renders the bubble only for a quoted message 30 days
+ * old or younger — an older target is delivered as a plain message rather than
+ * rejected, so the quote degrades silently. And quoting inside a group send (Groups
+ * API, 2026) is not documented by Meta and has not been verified against a real
+ * WABA; 1:1 is.
+ *
+ * `sendReaction` acts on an existing message rather than producing a new one, so
+ * it is not part of the table above. Unlike the quote option, every provider
+ * honors it — the four wire shapes and the meaning of a blank emoji live in that
+ * method's own docblock.
  */
 interface MessagesContract
 {
@@ -55,6 +73,29 @@ interface MessagesContract
     public function sendPtv(string $uid, string $token, string $to, string $videoUrl, array $options = []): array;
     public function pinMessage(string $uid, string $token, string $phone, string $messageId, string $duration): array;
     /**
+     * Forward an existing message to another chat. $to is the destination,
+     * $messageId the message being forwarded and $sourceChat the chat it
+     * currently lives in — the id alone does not locate a message, so the
+     * source is required, never derived.
+     *
+     * The copy carries WhatsApp's "Forwarded" label and keeps the original
+     * content, media included: nothing is re-uploaded by the caller.
+     *
+     * Supported by z-api, ZApiLite and funapi only, and the two do not share a
+     * wire: z-api posts `messagePhone`, funapi `sourceChat`. Each client
+     * translates, so callers pass $sourceChat and never the provider's name.
+     *
+     * Meta and Uazapi return an error. Neither provider exposes a forward-by-id
+     * operation at all — this is a capability gap, not an unwired option, so it
+     * cannot be fixed here. Uazapi's `forward` flag on /send/* only labels a
+     * message the caller composes; Meta has no equivalent of any kind.
+     *
+     * funapi additionally honors `scheduledFor` (ISO 8601) and, like z-api,
+     * `delayMessage` — the bridge caps both at 60 seconds.
+     */
+    public function forwardMessage(string $uid, string $token, string $to, string $messageId, string $sourceChat, array $options = []): array;
+
+    /**
      * React to an existing message with an emoji, or withdraw that reaction.
      *
      * WhatsApp keeps a single reaction per sender per message, so sending a new
@@ -67,7 +108,25 @@ interface MessagesContract
      * `$to` is a chat phone or a group id, so groups work unchanged. The
      * reacted message's own type is irrelevant — `$messageId` is opaque.
      *
-     * @param  array{delayMessage?: int}  $options
+     * All four providers honor it, each with its own wire, and the blank always
+     * means the same thing:
+     *
+     *   z-api / ZApiLite / funapi — two endpoints. A blank routes to
+     *     send-remove-reaction {phone, messageId}, anything else to
+     *     send-reaction, which adds `reaction`.
+     *   Uazapi — one endpoint, /message/react {number, text, id}, where `text`
+     *     carries the emoji and an empty `text` is itself the removal.
+     *   Meta — a message of its own: `type: reaction` with
+     *     `reaction: {message_id, emoji}`, an empty `emoji` being the removal.
+     *
+     * funapi honors one extra option, `sender`: the JID of whoever sent the
+     * message being reacted to. The bridge needs it to build the reaction and
+     * falls back to the chat JID when absent, which is right for a 1:1 and
+     * wrong for a group — reacting to another participant's message without it
+     * lands on nothing without erroring. z-api resolves the sender server-side
+     * and ignores the option.
+     *
+     * @param  array{delayMessage?: int, sender?: string}  $options
      */
     public function sendReaction(string $uid, string $token, string $to, string $messageId, string $reaction, array $options = []): array;
     /**

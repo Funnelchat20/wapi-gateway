@@ -1376,6 +1376,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $payload = ['phone' => $to, 'messageId' => $messageId];
         if (! $removing) $payload['reaction'] = $reaction;
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+        $payload = $this->decorateReactionPayload($payload, $options);
 
         $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
             ->timeout(config("$this->configPrefix.timeout", 60))
@@ -1394,6 +1395,16 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return MessageResource::make($res->json());
     }
 
+    /**
+     * Seam for subclasses that need extra fields on a reaction payload. Z-API
+     * needs none: it resolves who sent the reacted message server-side.
+     * {@see FunapiClient::decorateReactionPayload()} overrides this.
+     */
+    protected function decorateReactionPayload(array $payload, array $options): array
+    {
+        return $payload;
+    }
+
     public function pinMessage(string $uid, string $token, string $phone, string $messageId, string $duration): array
     {
         $startTime = microtime(true);
@@ -1401,6 +1412,27 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $payload = ['phone' => $phone, 'messageId' => $messageId, 'messageAction' => 'pin', 'pinMessageDuration' => $duration];
         $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 60))->post($url, $payload);
         $this->logRequest('pinMessage', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return $res->json();
+    }
+
+    /**
+     * Forward an existing message to another chat. Nothing is re-uploaded: the
+     * provider resolves the original from ($messageId, $sourceChat) and sends a
+     * copy carrying WhatsApp's "Forwarded" label, so media keeps its original
+     * upload and any message type works.
+     *
+     * $sourceChat is not optional and not derivable: the same id means nothing
+     * without the chat it lives in, which is why z-api asks for both.
+     */
+    public function forwardMessage(string $uid, string $token, string $to, string $messageId, string $sourceChat, array $options = []): array
+    {
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'forward-message'], $this->baseUrl());
+        $payload = ['phone' => $to, 'messageId' => $messageId, 'messagePhone' => $sourceChat];
+        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 60))->post($url, $payload);
+        $this->logRequest('forwardMessage', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
     }

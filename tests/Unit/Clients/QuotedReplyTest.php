@@ -4,6 +4,7 @@ namespace Funnelchat\WapiGateway\Tests\Unit\Clients;
 
 use Funnelchat\WapiGateway\Clients\FunapiClient;
 use Funnelchat\WapiGateway\Clients\MetaClient;
+use Funnelchat\WapiGateway\Clients\UazapiClient;
 use Funnelchat\WapiGateway\Clients\ZApiClient;
 use Funnelchat\WapiGateway\Clients\ZApiLiteClient;
 use Funnelchat\WapiGateway\Providers\WapiServiceProvider;
@@ -17,10 +18,16 @@ use PHPUnit\Framework\Attributes\DataProvider;
  * still sends, just without the reply relation. Nothing surfaces the difference
  * at runtime, which is exactly why the wire field is pinned here per method.
  *
- * The deliberate no-ops (send-audio, poll/list/buttons/event, Meta) are pinned
- * too: they are decisions driven by what the provider endpoint accepts, not
- * oversights, and wiring one later should trip a test rather than quietly
- * change behavior.
+ * The deliberate no-ops are pinned too: they are decisions driven by what the
+ * provider endpoint accepts, not oversights, and wiring one later should trip a
+ * test rather than quietly change behavior.
+ *
+ * The wire field is not shared across providers, so each one is pinned on its
+ * own shape: z-api/funapi send a flat `messageId`, UAZAPI a flat `replyid`, and
+ * Meta a nested `context.message_id`. What the endpoint accepts differs too —
+ * z-api cannot quote from send-audio or send-poll/list/buttons, while the same
+ * sends quote fine on UAZAPI because they all go through /send/media and
+ * /send/menu, both of which document the param.
  */
 class QuotedReplyTest extends TestCase
 {
@@ -40,11 +47,19 @@ class QuotedReplyTest extends TestCase
         config([
             'zapi.base_url' => 'https://zapi.example.com',
             'zapi.client_token' => 'zapi-client-token',
-            'zapilite.base_url' => 'https://zapilite.example.com',
-            'zapilite.client_token' => 'zapilite-client-token',
+            // ZApiLiteClient reads the `zapi-lite` prefix; under the old key it
+            // silently fell back to the real api.z-api.io base URL.
+            'zapi-lite.base_url' => 'https://zapilite.example.com',
+            'zapi-lite.client_token' => 'zapilite-client-token',
             'funapi.base_url' => 'https://funapi.example.com',
             'funapi.client_token' => 'funapi-client-token',
         ]);
+
+        // The shipped endpoint map, not a hand-written copy: which UAZAPI URL a
+        // send lands on is exactly what decides whether the quote is honored,
+        // so a repointed endpoint has to be able to break these tests.
+        config(['uazapi' => require dirname(__DIR__, 3) . '/config/uazapi.php']);
+        config(['uazapi.base_url' => 'https://uazapi.example.com']);
 
         $this->fakeOk();
     }
@@ -66,6 +81,32 @@ class QuotedReplyTest extends TestCase
     {
         Http::assertSent(fn($request) => str_contains($request->url(), $endpoint)
             && ! array_key_exists('messageId', $request->data()));
+    }
+
+    /** UAZAPI names the param `replyid` and takes it on every /send/* used here. */
+    private function assertUazapiQuoted(string $endpoint): void
+    {
+        Http::assertSent(fn($request) => str_contains($request->url(), $endpoint)
+            && ($request->data()['replyid'] ?? null) === self::QUOTED_ID);
+    }
+
+    private function assertUazapiNotQuoted(string $endpoint): void
+    {
+        Http::assertSent(fn($request) => str_contains($request->url(), $endpoint)
+            && ! array_key_exists('replyid', $request->data()));
+    }
+
+    /** Meta carries the quote nested under `context`, never as a flat field. */
+    private function assertMetaQuoted(): void
+    {
+        Http::assertSent(fn($request) => str_contains($request->url(), '/messages')
+            && ($request->data()['context']['message_id'] ?? null) === self::QUOTED_ID);
+    }
+
+    private function assertMetaNotQuoted(): void
+    {
+        Http::assertSent(fn($request) => str_contains($request->url(), '/messages')
+            && ! array_key_exists('context', $request->data()));
     }
 
     /**
@@ -238,19 +279,126 @@ class QuotedReplyTest extends TestCase
     }
 
     /**
-     * Meta is deliberately NOT wired: WhatsApp Cloud API needs `context.message_id`
-     * and has no group support, the only consumer of quoting so far.
+     * Every UAZAPI send whose endpoint documents `replyid`, paired with the URL
+     * fragment the request must contain. Audio is in the quotable set on purpose:
+     * it ships through /send/media like every other file, so z-api's send-audio
+     * carve-out has no counterpart here.
+     *
+     * @return array<string, array{0: callable, 1: string}>
      */
-    public function test_meta_ignores_the_quote_option(): void
+    public static function uazapiQuotableSends(): array
+    {
+        $quote = ['messageId' => self::QUOTED_ID];
+
+        return [
+            'sendText' => [fn($c) => $c->sendText('UID', 'TOKEN', self::GROUP, 'Respondiendo', $quote), '/send/text'],
+            'sendFile image' => [fn($c) => $c->sendFile('UID', 'TOKEN', self::GROUP, 'https://cdn.example.com/a.jpg', $quote), '/send/media'],
+            'sendFile audio' => [fn($c) => $c->sendFile('UID', 'TOKEN', self::GROUP, 'https://cdn.example.com/a.mp3', $quote), '/send/media'],
+            'sendFile document' => [fn($c) => $c->sendFile('UID', 'TOKEN', self::GROUP, 'https://cdn.example.com/a.pdf', $quote), '/send/media'],
+            'sendLocation' => [fn($c) => $c->sendLocation('UID', 'TOKEN', self::GROUP, -34.6, -58.4, $quote), '/send/location'],
+            'sendContact' => [fn($c) => $c->sendContact('UID', 'TOKEN', self::GROUP, 'Ada', '5491100000000', $quote), '/send/contact'],
+            'sendLink' => [fn($c) => $c->sendLink('UID', 'TOKEN', self::GROUP, 'Mirá esto', 'https://example.com', $quote), '/send/text'],
+            'sendButtons' => [fn($c) => $c->sendButtons('UID', 'TOKEN', self::GROUP, 'Elegí', [['id' => 'b1', 'label' => 'Sí']], $quote), '/send/menu'],
+            'sendButtonLink' => [fn($c) => $c->sendButtonLink('UID', 'TOKEN', self::GROUP, 'Mirá', 'https://example.com', 'Abrir', $quote), '/send/menu'],
+            'sendOptionList' => [fn($c) => $c->sendOptionList('UID', 'TOKEN', self::GROUP, 'Elegí', 'Ver', [['id' => 'o1', 'title' => 'Uno']], $quote), '/send/menu'],
+            'sendPoll' => [fn($c) => $c->sendPoll('UID', 'TOKEN', self::GROUP, '¿Cuál?', ['A', 'B'], $quote), '/send/menu'],
+        ];
+    }
+
+    #[DataProvider('uazapiQuotableSends')]
+    public function test_uazapi_forwards_the_quote_target(callable $send, string $endpoint): void
+    {
+        $send(new UazapiClient());
+
+        $this->assertUazapiQuoted($endpoint);
+    }
+
+    public function test_uazapi_omits_replyid_when_not_quoting(): void
+    {
+        (new UazapiClient())->sendText('UID', 'TOKEN', '5491100000000', 'Mensaje suelto');
+
+        $this->assertUazapiNotQuoted('/send/text');
+    }
+
+    /**
+     * Same rule as z-api: a nullable quote target must not reach the wire as an
+     * empty `replyid`, so callers can pass the field through without branching.
+     *
+     * @param mixed $blank
+     */
+    #[DataProvider('blankQuoteTargets')]
+    public function test_uazapi_treats_a_blank_message_id_as_no_quote($blank): void
+    {
+        (new UazapiClient())->sendText('UID', 'TOKEN', '5491100000000', 'Mensaje suelto', ['messageId' => $blank]);
+
+        $this->assertUazapiNotQuoted('/send/text');
+    }
+
+    /**
+     * `context` is part of the Cloud API's base message properties, so it rides
+     * along unchanged whatever `type` the payload declares — one shape for text,
+     * media, location, contacts and interactive alike.
+     *
+     * @return array<string, array{0: callable}>
+     */
+    public static function metaQuotableSends(): array
+    {
+        $quote = ['messageId' => self::QUOTED_ID];
+
+        return [
+            'sendText' => [fn($c) => $c->sendText('WABA-ID', 'TOKEN', '5491100000000', 'Respondiendo', $quote)],
+            'sendFile image' => [fn($c) => $c->sendFile('WABA-ID', 'TOKEN', '5491100000000', 'https://cdn.example.com/a.jpg', $quote)],
+            'sendFile audio' => [fn($c) => $c->sendFile('WABA-ID', 'TOKEN', '5491100000000', 'https://cdn.example.com/a.mp3', $quote)],
+            'sendFile document' => [fn($c) => $c->sendFile('WABA-ID', 'TOKEN', '5491100000000', 'https://cdn.example.com/a.pdf', $quote)],
+            'sendLocation' => [fn($c) => $c->sendLocation('WABA-ID', 'TOKEN', '5491100000000', -34.6, -58.4, $quote)],
+            'sendContact' => [fn($c) => $c->sendContact('WABA-ID', 'TOKEN', '5491100000000', 'Ada', '5491100000000', $quote)],
+            'sendLink' => [fn($c) => $c->sendLink('WABA-ID', 'TOKEN', '5491100000000', 'Mirá esto', 'https://example.com', $quote)],
+            'sendButtons' => [fn($c) => $c->sendButtons('WABA-ID', 'TOKEN', '5491100000000', 'Elegí', [['id' => 'b1', 'label' => 'Sí']], $quote)],
+            'sendButtonLink' => [fn($c) => $c->sendButtonLink('WABA-ID', 'TOKEN', '5491100000000', 'Mirá', 'https://example.com', 'Abrir', $quote)],
+            'sendOptionList' => [fn($c) => $c->sendOptionList('WABA-ID', 'TOKEN', '5491100000000', 'Elegí', 'Ver', [['id' => 'o1', 'title' => 'Uno']], $quote)],
+        ];
+    }
+
+    #[DataProvider('metaQuotableSends')]
+    public function test_meta_forwards_the_quote_target_as_context(callable $send): void
+    {
+        $send(new MetaClient());
+
+        $this->assertMetaQuoted();
+    }
+
+    public function test_meta_omits_context_when_not_quoting(): void
+    {
+        (new MetaClient())->sendText('WABA-ID', 'TOKEN', '5491100000000', 'Mensaje suelto');
+
+        $this->assertMetaNotQuoted();
+    }
+
+    /**
+     * Meta rejects an empty `context.message_id` outright rather than degrading
+     * to a plain message, so a blank target must never reach the wire.
+     *
+     * @param mixed $blank
+     */
+    #[DataProvider('blankQuoteTargets')]
+    public function test_meta_treats_a_blank_message_id_as_no_quote($blank): void
+    {
+        (new MetaClient())->sendText('WABA-ID', 'TOKEN', '5491100000000', 'Mensaje suelto', ['messageId' => $blank]);
+
+        $this->assertMetaNotQuoted();
+    }
+
+    /**
+     * The quote never leaks into the flat `messageId` z-api uses: Meta ignores
+     * unknown top-level params silently, so a wrong field name would look like
+     * a working send while the reply relation quietly disappears.
+     */
+    public function test_meta_does_not_send_the_flat_zapi_field(): void
     {
         (new MetaClient())->sendText('WABA-ID', 'TOKEN', '5491100000000', 'Respondiendo', [
             'messageId' => self::QUOTED_ID,
         ]);
 
-        Http::assertSent(function ($request) {
-            $data = $request->data();
-
-            return ! array_key_exists('messageId', $data) && ! array_key_exists('context', $data);
-        });
+        Http::assertSent(fn($request) => ! array_key_exists('messageId', $request->data()));
     }
 }

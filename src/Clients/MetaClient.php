@@ -120,6 +120,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'type' => 'text',
             'text' => ['body' => $text],
         ];
+        $payload = $this->applyQuoteOption($payload, $options);
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendText', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
@@ -172,6 +173,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $payload = ['messaging_product' => 'whatsapp', ...$this->recipientField($to), 'type' => $type, $type => $media];
         if (isset($options['fileName']) && $type === 'document') $payload[$type]['filename'] = $options['fileName'];
         if (isset($options['caption']) && in_array($type, ['image', 'video', 'document'])) $payload[$type]['caption'] = $options['caption'];
+        $payload = $this->applyQuoteOption($payload, $options);
         $url = $this->messagesUrl($uid, $to);
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
@@ -188,6 +190,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $payload = ['messaging_product' => 'whatsapp', ...$this->recipientField($to), 'type' => 'location', 'location' => ['latitude' => $lat, 'longitude' => $lng]];
         if (isset($options['name'])) $payload['location']['name'] = $options['name'];
         if (isset($options['address'])) $payload['location']['address'] = $options['address'];
+        $payload = $this->applyQuoteOption($payload, $options);
         $url = $this->messagesUrl($uid, $to);
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
@@ -232,6 +235,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         if ($headerType !== null) {
             $payload['interactive']['header'] = ['type' => $headerType, $headerType => ['link' => $options['fileUrl']]];
         }
+        $payload = $this->applyQuoteOption($payload, $options);
         $url = $this->messagesUrl($uid, $to);
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
@@ -256,6 +260,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 'action' => ['name' => 'cta_url', 'parameters' => ['display_text' => $label, 'url' => $url]]
             ]
         ];
+        $payload = $this->applyQuoteOption($payload, $options);
         $requestUrl = $this->messagesUrl($uid, $to);
         $res = Http::withToken($token)->post($requestUrl, $payload);
         if ($res->failed()) {
@@ -308,6 +313,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 ]
             ]
         ];
+        $payload = $this->applyQuoteOption($payload, $extra);
         $url = $this->messagesUrl($uid, $to);
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
@@ -348,6 +354,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'type' => 'text',
             'text' => ['body' => $message . ' ' . $linkUrl, 'preview_url' => true],
         ];
+        $payload = $this->applyQuoteOption($payload, $options);
         $url = $this->messagesUrl($uid, $to);
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
@@ -415,14 +422,54 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     }
 
     /**
-     * WhatsApp Cloud API does support reactions in 1:1 chats (via a `reaction`
-     * message type), but it has no group support at all, and the group chat is
-     * the only consumer of this method. Wiring the 1:1 shape here would add a
-     * path nothing calls, so it reports unsupported until something needs it.
+     * WhatsApp Cloud API has no forward operation: there is no endpoint that
+     * takes a wamid and re-sends that message elsewhere, and no way to produce
+     * the "Forwarded" label the app shows. The nearest equivalent is composing
+     * a new message with the same content, which is an ordinary send and is
+     * already covered by the send* methods — so it is not dressed up as a
+     * forward here.
+     */
+    public function forwardMessage(string $uid, string $token, string $to, string $messageId, string $sourceChat, array $options = []): array
+    {
+        return ['error' => 'Not supported'];
+    }
+
+    /**
+     * Cloud API models a reaction as a message of its own: `type: reaction`
+     * carrying the target's wamid and the emoji. $to is the chat, $messageId
+     * the wamid of the message being reacted to.
+     *
+     * A blank emoji is Meta's own removal signal, which is exactly the contract
+     * the z-api family implements by routing to send-remove-reaction — so the
+     * blank is normalized and passed through rather than refused. Whitespace
+     * counts as blank: Meta would reject "   " as an invalid emoji, and the
+     * caller meant "remove".
+     *
+     * Contrary to what this client assumed while reactions were unwired, Cloud
+     * API is not limited to 1:1 here — Meta shipped group messaging in 2026
+     * (`recipient_type: group`), so the group case that motivated reactions is
+     * reachable. `recipientField()` already routes a BSUID correctly.
      */
     public function sendReaction(string $uid, string $token, string $to, string $messageId, string $reaction, array $options = []): array
     {
-        return ['error' => 'Not supported'];
+        $startTime = microtime(true);
+        $emoji = trim($reaction) === '' ? '' : $reaction;
+        $payload = [
+            'messaging_product' => 'whatsapp',
+            ...$this->recipientField($to),
+            'type' => 'reaction',
+            'reaction' => ['message_id' => $messageId, 'emoji' => $emoji],
+        ];
+        $url = $this->messagesUrl($uid, $to);
+        $res = Http::withToken($token)->post($url, $payload);
+        $context = ['phone' => $to, 'removing' => $emoji === ''];
+        if ($res->failed()) {
+            $context['error'] = $res->json('error', 'Failed to send');
+            $this->logRequest('sendReaction', $uid, $context, $startTime, $res, $url, $payload);
+            return $this->sendError($res, $to);
+        }
+        $this->logRequest('sendReaction', $uid, $context, $startTime, $res, $url, $payload);
+        return MessageResource::make($res->json());
     }
 
     public function sendTypingIndicator(string $uid, string $token, string $messageId): array
@@ -494,6 +541,30 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return $result;
     }
 
+    /**
+     * Translate the `messageId` option into the Cloud API's quote shape: a
+     * top-level `context.message_id` carrying the wamid of the quoted message.
+     * Unlike z-api's flat `messageId`, `context` belongs to the base message
+     * properties, so every type this client builds — text, media, location,
+     * contacts and interactive — takes it unchanged.
+     *
+     * Meta renders the bubble only for a message 30 days old or younger. Past
+     * that it delivers the send as a plain message instead of failing, so a
+     * stale quote degrades silently and never costs the send.
+     *
+     * A blank value is dropped rather than forwarded — Meta rejects an empty
+     * `context.message_id` — so callers can pass a nullable field straight
+     * through without branching.
+     */
+    private function applyQuoteOption(array $payload, array $options): array
+    {
+        $messageId = $options['messageId'] ?? null;
+        if (is_scalar($messageId) && trim((string) $messageId) !== '') {
+            $payload['context'] = ['message_id' => (string) $messageId];
+        }
+        return $payload;
+    }
+
     public function addContacts(string $uid, string $token, array $contacts): array
     {
         return ['error' => 'Not supported'];
@@ -521,6 +592,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
                 'phones' => [[ 'phone' => $contactPhone, 'wa_id' => $contactPhone ]]
             ]]
         ];
+        $payload = $this->applyQuoteOption($payload, $options);
         $url = $this->messagesUrl($uid, $to);
         $res = Http::withToken($token)->post($url, $payload);
         if ($res->failed()) {
