@@ -80,7 +80,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $payload = $this->applyTypingOption($payload, $options);
 
         $request = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
-            ->timeout(config("$this->configPrefix.timeout", 120));
+            ->timeout((int)($options["timeout"] ?? config("$this->configPrefix.timeout", 120)));
 
         // Apply retry logic if enabled in options
         if ($options['retry'] ?? false) {
@@ -523,7 +523,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, $action], $this->baseUrl());
 
         $request = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
-            ->timeout(config("$this->configPrefix.timeout", 120));
+            ->timeout((int)($options["timeout"] ?? config("$this->configPrefix.timeout", 120)));
 
         // Apply retry logic if enabled in options
         if ($options['retry'] ?? false) {
@@ -594,7 +594,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-button-list'], $this->baseUrl());
 
         $request = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
-            ->timeout(config("$this->configPrefix.timeout", 120));
+            ->timeout((int)($options["timeout"] ?? config("$this->configPrefix.timeout", 120)));
 
         // Apply retry logic if enabled in options
         if ($options['retry'] ?? false) {
@@ -666,7 +666,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-poll'], $this->baseUrl());
 
         $request = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
-            ->timeout(config("$this->configPrefix.timeout", 120));
+            ->timeout((int)($options["timeout"] ?? config("$this->configPrefix.timeout", 120)));
 
         // Apply retry logic if enabled in options
         if ($options['retry'] ?? false) {
@@ -1316,7 +1316,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $params = $this->applyQuoteOption($params, $options);
 
         $request = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
-            ->timeout(config("$this->configPrefix.timeout", 120));
+            ->timeout((int)($options["timeout"] ?? config("$this->configPrefix.timeout", 120)));
 
         if ($options['retry'] ?? false) {
             $request = $request->retry(
