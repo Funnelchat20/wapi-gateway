@@ -6,6 +6,7 @@ use Funnelchat\WapiGateway\Contracts\MessagesContract;
 use Funnelchat\WapiGateway\Contracts\InstancesContract;
 use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\TemplatesContract;
+use Funnelchat\WapiGateway\Helpers\BucketFile;
 use Funnelchat\WapiGateway\Helpers\WhatsAppCloudHelper;
 use Funnelchat\WapiGateway\Jobs\StoreDeviceLogJob;
 use Funnelchat\WapiGateway\Resources\Meta\MessageResource;
@@ -701,12 +702,30 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return $res->json();
     }
 
+    /**
+     * Upload a bucket object to Meta and return its `media_id`.
+     *
+     * Runs once per broadcast page, so the S3 read is bounded and the key is
+     * percent-encoded — see {@see BucketFile}.
+     *
+     * Failure is returned, never thrown, and the two sources are distinguishable
+     * by the caller: a download failure carries `error_source => 'download'`
+     * (and keeps the permanent/transient split in its message), while a Meta
+     * rejection carries Meta's own error payload under `error`.
+     *
+     * @return array{error: string, error_source: string}|array{error: mixed}|array<string, mixed>
+     */
     public function uploadMedia(string $uid, string $token, string $fileKey, ?string $mime = null): array
     {
         $startTime = microtime(true);
-        $fileUrl = config('wapi-gateway.aws_bucket_url') . '/' . $fileKey;
-        $fileContent = @file_get_contents($fileUrl);
-        if ($fileContent === false) return ['error' => 'File not found'];
+        $file = BucketFile::fetch($fileKey);
+        if (isset($file['error'])) {
+            // The download used to fail silently; a failure here never reaches
+            // Meta, so it has to be visible on its own.
+            $this->logRequest('uploadMedia', $uid, ['error' => $file['error'], 'error_source' => 'download', 'file_key' => $fileKey], $startTime, null, BucketFile::url($fileKey));
+            return $file;
+        }
+        $fileContent = $file['content'];
         if ($mime === null) {
             $mime = (new \finfo(FILEINFO_MIME_TYPE))->buffer($fileContent) ?: 'application/octet-stream';
         }
@@ -727,9 +746,12 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     {
         $startTime = microtime(true);
         $appId = config('wapi-gateway.meta_app_id');
-        $fileUrl = config('wapi-gateway.aws_bucket_url') . '/' . $fileKey;
-        $fileContent = @file_get_contents($fileUrl);
-        if ($fileContent === false) return ['error' => 'File not found'];
+        $file = BucketFile::fetch($fileKey);
+        if (isset($file['error'])) {
+            $this->logRequest('uploadHeaderHandle', $appId, ['error' => $file['error'], 'error_source' => 'download', 'file_key' => $fileKey], $startTime, null, BucketFile::url($fileKey));
+            return $file;
+        }
+        $fileContent = $file['content'];
         $fileSize = strlen($fileContent);
         $finfo = new \finfo(FILEINFO_MIME_TYPE);
         $fileMimeType = $finfo->buffer($fileContent);

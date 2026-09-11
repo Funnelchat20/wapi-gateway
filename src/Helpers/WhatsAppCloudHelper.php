@@ -130,11 +130,11 @@ class WhatsAppCloudHelper
 
     public static function uploadFileHeaderHandle($file, $token, $apiUrl)
     {
-        $fileUrl = config('wapi-gateway.aws_bucket_url') . '/' . $file;
-        $fileContent = @file_get_contents($fileUrl);
-        if ($fileContent === false) {
-            return ['error' => 'File not found'];
+        $downloaded = BucketFile::fetch($file);
+        if (isset($downloaded['error'])) {
+            return $downloaded;
         }
+        $fileContent = $downloaded['content'];
 
         $fileSize = strlen($fileContent);
         $finfo = new finfo(FILEINFO_MIME_TYPE);

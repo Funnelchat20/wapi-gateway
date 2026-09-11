@@ -5,6 +5,7 @@ namespace Funnelchat\WapiGateway\Http\Controllers;
 use Funnelchat\WapiGateway\Enums\FileExtensionEnum;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Funnelchat\WapiGateway\Helpers\BucketFile;
 use Funnelchat\WapiGateway\Helpers\WhatsAppCloudHelper;
 use Illuminate\Support\Facades\Http;
 use finfo;
@@ -389,8 +390,8 @@ class WhatsAppCloudApiController
             'file' => ['string', 'required'],
             'user_id' => ['int', 'required'],
         ]);
-        $fileUrl = config('wapi-gateway.aws_bucket_url') . '/' . $validated['user_id'] . '/' . $validated['file'];
-        $fileContent = @file_get_contents($fileUrl);
+        $downloaded = BucketFile::fetch($validated['user_id'] . '/' . $validated['file']);
+        $fileContent = $downloaded['content'] ?? null;
         if ($fileContent) {
             $fileSize = strlen($fileContent);
             $finfo = new finfo(FILEINFO_MIME_TYPE);
