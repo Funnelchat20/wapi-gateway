@@ -872,6 +872,18 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return ['success' => true];
     }
 
+    /**
+     * UAZAPI's delete-message endpoint only takes `{"id": messageId}` — no
+     * scope/owner field to request a local-only delete instead of the
+     * default recall, per `config('uazapi.endpoints.delete_message')` above
+     * and this provider's own docs. Refuse explicitly rather than silently
+     * performing a for-everyone delete when the caller asked for for-me only.
+     */
+    public function deleteMessageForMe(string $uid, string $token, string $messageId, string $phone, bool $owner): array
+    {
+        return ['error' => 'deleteMessageForMe is not supported by UAZAPI provider'];
+    }
+
     public function contact(string $uid, string $token, string $phone): array
     {
         $startTime = microtime(true);

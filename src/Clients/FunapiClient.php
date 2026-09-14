@@ -1251,6 +1251,20 @@ class FunapiClient extends ZApiClient
         return ['success' => true];
     }
 
+    /**
+     * Unlike `businessProfile()`/`deleteMessage()` above, this is NOT known to
+     * mirror Z-API 1:1: Funapi/whatsgo has no public API docs, and this
+     * bridge's own endpoint audit never exercised a local-only delete. Since
+     * ZApiClient::deleteMessageForMe() would otherwise be inherited unchanged
+     * and silently sent to this backend, override it to refuse explicitly —
+     * guessing wrong here would mean the message actually gets recalled for
+     * everyone instead of the local-only delete the caller asked for.
+     */
+    public function deleteMessageForMe(string $uid, string $token, string $messageId, string $phone, bool $owner): array
+    {
+        return ['error' => 'deleteMessageForMe is not supported by Funapi provider'];
+    }
+
     protected function formatError(mixed $error): string
     {
         if (is_array($error)) {

@@ -1103,6 +1103,28 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return ['success' => true];
     }
 
+    /**
+     * Z-API's own docs (https://developer.z-api.io/en/message/delete-message)
+     * document `deleteForMe` as an additional query param on the same
+     * `DELETE .../messages` endpoint used by `deleteMessage()`: omitted or
+     * `false` recalls the message for everyone (today's `deleteMessage()`
+     * behavior); `true` removes it only from the caller's own session. Kept
+     * as its own method (mirroring how `deleteChat`/`deleteMessage` are
+     * already separate operations here) rather than a flag on
+     * `deleteMessage()`, to avoid changing that method's existing signature.
+     */
+    public function deleteMessageForMe(string $uid, string $token, string $messageId, string $phone, bool $owner): array
+    {
+        $startTime = microtime(true);
+        $base = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'messages'], $this->baseUrl());
+        $query = http_build_query(['messageId' => $messageId, 'phone' => $phone]) . ($owner ? '&owner=true' : '') . '&deleteForMe=true';
+        $url = $base . '?' . $query;
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(20)->delete($url);
+        $this->logRequest('deleteMessageForMe', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
+        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        return ['success' => true];
+    }
+
     protected function formatError(mixed $error): string
     {
         if (is_array($error)) {
