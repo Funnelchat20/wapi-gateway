@@ -56,6 +56,25 @@ interface GroupsContract
 
     public function deleteChat(string $uid, string $token, string $phone): array;
     public function deleteMessage(string $uid, string $token, string $messageId, string $phone, bool $owner): array;
+
+    /**
+     * "Delete for me": removes the message only from the caller's own
+     * session/device — the recipient keeps seeing it. This is a different
+     * operation from `deleteMessage()`'s `$owner` flag: `$owner` only tells
+     * the provider whether the caller sent the message (needed to identify
+     * the message key), it does not change the blast radius of the delete,
+     * which today is always "for everyone" (recall). `$owner` is still
+     * required here for the same key-identification reason.
+     *
+     * Not every provider's own WhatsApp bridge exposes this distinction —
+     * see each client's implementation. A provider that cannot honor a
+     * local-only delete must refuse explicitly
+     * (`['error' => '<method> is not supported by <PROVIDER> provider']`)
+     * rather than silently falling back to deleting for everyone, which
+     * would be a data-loss surprise for the recipient.
+     */
+    public function deleteMessageForMe(string $uid, string $token, string $messageId, string $phone, bool $owner): array;
+
     public function deleteMessagesConcurrently(string $uid, string $token, array $deleteRequests): array;
     public function createNewsletter(string $uid, string $token, string $name, string $description): array;
     public function updateNewsletterName(string $uid, string $token, string $id, string $name): array;
