@@ -1316,7 +1316,7 @@ class FunapiClient extends ZApiClient
 
     private function normalizeQueuedMessage(array $raw): array
     {
-        $timestamp = $raw['Created'] ?? $raw['createdAt'] ?? $raw['created_at'] ?? $raw['timestamp'] ?? null;
+        $timestamp = $raw['Created'] ?? $raw['created'] ?? $raw['createdAt'] ?? $raw['created_at'] ?? $raw['timestamp'] ?? null;
         $created = $timestamp
             ? (is_numeric($timestamp) ? \Carbon\Carbon::createFromTimestampMs($timestamp)->toIso8601String() : \Carbon\Carbon::parse($timestamp)->toIso8601String())
             : null;
