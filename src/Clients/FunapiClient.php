@@ -1316,18 +1316,19 @@ class FunapiClient extends ZApiClient
 
     private function normalizeQueuedMessage(array $raw): array
     {
-        $created = isset($raw['Created'])
-            ? \Carbon\Carbon::createFromTimestampMs($raw['Created'])->toIso8601String()
+        $timestamp = $raw['Created'] ?? $raw['created'] ?? $raw['createdAt'] ?? $raw['created_at'] ?? $raw['timestamp'] ?? null;
+        $created = $timestamp
+            ? (is_numeric($timestamp) ? \Carbon\Carbon::createFromTimestampMs($timestamp)->toIso8601String() : \Carbon\Carbon::parse($timestamp)->toIso8601String())
             : null;
 
         return [
-            'ZaapId' => $raw['ZaapId'] ?? null,
-            'messageId' => $raw['MessageId'] ?? null,
-            'message' => $raw['Message'] ?? '',
+            'ZaapId' => $raw['ZaapId'] ?? $raw['zaapId'] ?? $raw['id'] ?? null,
+            'messageId' => $raw['MessageId'] ?? $raw['messageId'] ?? $raw['message_id'] ?? null,
+            'message' => $raw['Message'] ?? $raw['message'] ?? $raw['text'] ?? $raw['body'] ?? '',
             'created' => $created,
-            'phone' => $raw['Phone'] ?? null,
-            'fileUrl' => $raw['ImageUrl'] ?? $raw['DocumentUrl'] ?? $raw['VideoUrl'] ?? $raw['AudioUrl'] ?? '',
-            'caption' => $raw['Caption'] ?? '',
+            'phone' => $raw['Phone'] ?? $raw['phone'] ?? $raw['to'] ?? null,
+            'fileUrl' => $raw['ImageUrl'] ?? $raw['imageUrl'] ?? $raw['DocumentUrl'] ?? $raw['documentUrl'] ?? $raw['VideoUrl'] ?? $raw['videoUrl'] ?? $raw['AudioUrl'] ?? $raw['audioUrl'] ?? $raw['fileUrl'] ?? '',
+            'caption' => $raw['Caption'] ?? $raw['caption'] ?? '',
         ];
     }
 
