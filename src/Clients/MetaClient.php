@@ -22,7 +22,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     {
         return 'meta';
     }
-    private string $graph = 'https://graph.facebook.com/v20.0/';
+    private string $graph = 'https://graph.facebook.com/v26.0/';
 
     private const TYPING_INDICATOR_TIMEOUT = 5;
 

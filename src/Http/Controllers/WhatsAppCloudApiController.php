@@ -19,7 +19,7 @@ use Funnelchat\WapiGateway\Jobs\MessageApp\TemplateUpdatedStatusObservationJob;
 
 class WhatsAppCloudApiController
 {
-    private string $apiUrl = 'https://graph.facebook.com/v20.0/';
+    private string $apiUrl = 'https://graph.facebook.com/v26.0/';
     private const DEFAULT_MESSAGE_ERROR = 'An error occurred while sending the message.';
     private const DEFAULT_MESSAGE_ERROR_FILE = 'No se encontró el archivo.';
     private string|null|object $uid;
