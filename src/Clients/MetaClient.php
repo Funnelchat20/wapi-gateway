@@ -590,7 +590,10 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'type' => 'contacts',
             'contacts' => [[
                 'name' => ['formatted_name' => $contactName, 'first_name' => $contactName],
-                'phones' => [[ 'phone' => $contactPhone, 'wa_id' => $contactPhone ]]
+                'phones' => [[
+                    'phone' => WhatsAppCloudHelper::contactPhoneField($contactPhone),
+                    'wa_id' => WhatsAppCloudHelper::contactWaId($contactPhone),
+                ]]
             ]]
         ];
         $payload = $this->applyQuoteOption($payload, $options);
