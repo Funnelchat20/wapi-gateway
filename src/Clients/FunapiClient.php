@@ -1042,7 +1042,7 @@ class FunapiClient extends ZApiClient
         $payload = ['autoInvite' => true, 'groupId' => $id, 'phones' => $phones];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
         $this->logRequest('addParticipants', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        if ($res->failed() || $res->json('error')) return $this->groupError($res);
         return ['success' => true];
     }
 
@@ -1053,7 +1053,7 @@ class FunapiClient extends ZApiClient
         $payload = ['groupId' => $id, 'phones' => $phones];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
         $this->logRequest('addAdmins', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        if ($res->failed() || $res->json('error')) return $this->groupError($res);
         return ['success' => true];
     }
 
@@ -1064,7 +1064,7 @@ class FunapiClient extends ZApiClient
         $payload = ['communityId' => $id, 'phones' => $phones];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
         $this->logRequest('addCommunityAdmins', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        if ($res->failed() || $res->json('error')) return $this->groupError($res);
         return ['success' => true];
     }
 
@@ -1075,7 +1075,7 @@ class FunapiClient extends ZApiClient
         $payload = ['groupId' => $id, 'phones' => $phones];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
         $this->logRequest('removeParticipants', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        if ($res->failed() || $res->json('error')) return $this->groupError($res);
         return ['success' => true];
     }
 
@@ -1086,7 +1086,7 @@ class FunapiClient extends ZApiClient
         $payload = ['groupId' => $id, 'phones' => $phones];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
         $this->logRequest('removeAdmins', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        if ($res->failed() || $res->json('error')) return $this->groupError($res);
         return ['success' => true];
     }
 
@@ -1097,7 +1097,7 @@ class FunapiClient extends ZApiClient
         $payload = ['communityId' => $id, 'phones' => $phones];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
         $this->logRequest('removeCommunityAdmins', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        if ($res->failed() || $res->json('error')) return $this->groupError($res);
         return ['success' => true];
     }
 
@@ -1108,7 +1108,7 @@ class FunapiClient extends ZApiClient
         $payload = ['communityId' => $id, 'phones' => $phones];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
         $this->logRequest('removeCommunityParticipant', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        if ($res->failed() || $res->json('error')) return $this->groupError($res);
         return ['success' => true];
     }
 
@@ -1263,6 +1263,77 @@ class FunapiClient extends ZApiClient
     public function deleteMessageForMe(string $uid, string $token, string $messageId, string $phone, bool $owner): array
     {
         return ['error' => 'deleteMessageForMe is not supported by Funapi provider'];
+    }
+
+    /**
+     * Funapi's `code` field -> this bridge's canonical error vocabulary.
+     *
+     * The `code` is the ONLY discriminating field on a group operation failure:
+     * Funapi reuses one `error` string across unrelated outcomes. Measured in
+     * production over 7 days (2026-09-22..29), `"group participant operation
+     * rejected"` alone covered four codes:
+     *
+     *   participant_already_in_group (409) x26   <- desired state already holds
+     *   group_resource_not_found     (404) x8    <- real failure
+     *   group_action_forbidden       (403) x1    <- real failure
+     *   group_upstream_failure       (502) x1    <- real failure
+     *
+     * Consumers that keyed off the string could not tell them apart, so a
+     * caller wanting to treat "already a participant" as success would have
+     * swallowed ten genuine failures. Map by `code`, never by the message.
+     */
+    private const FUNAPI_GROUP_CODE_MAP = [
+        'participant_already_in_group' => 'already_participant',
+        'participant_operation_partial' => 'partial_success',
+        'group_rate_limited' => 'rate_limited',
+        'group_resource_not_found' => 'group_not_found',
+        'group_action_forbidden' => 'group_forbidden',
+        'group_upstream_failure' => 'upstream_failure',
+    ];
+
+    /**
+     * Fallback for Funapi failures that carry no `code` (the 503/400 family).
+     *
+     * `formatError()` below is inherited z-api vocabulary and matches none of
+     * Funapi's actual strings, so without this table these fell through raw and
+     * every consumer classified them as a generic terminal failure — including
+     * the transient "client not connected", which is the one case that should
+     * not count against the user.
+     *
+     * Note `phones are required` is Funapi's message for a phone it cannot
+     * parse as E.164; the array is present and non-empty when it says this.
+     */
+    private const FUNAPI_GROUP_MESSAGE_MAP = [
+        'whatsapp client not connected' => 'not_connected',
+        'whatsapp connection dropped before the group request completed' => 'not_connected',
+        'phones are required' => 'invalid_phone_format',
+    ];
+
+    /**
+     * Build the error payload for a failed group participant/admin operation.
+     *
+     * Returns the canonical `error` plus the raw `code` and HTTP `status`, so a
+     * consumer can act on the specific outcome without re-parsing messages.
+     * Additive by design: callers that only read `error` keep working.
+     */
+    protected function groupError(\Illuminate\Http\Client\Response $res): array
+    {
+        $code = $res->json('code');
+        $rawMessage = $res->json('error', 'error');
+
+        $canonical = null;
+
+        if (is_string($code) && isset(self::FUNAPI_GROUP_CODE_MAP[$code])) {
+            $canonical = self::FUNAPI_GROUP_CODE_MAP[$code];
+        } elseif (is_string($rawMessage)) {
+            $canonical = self::FUNAPI_GROUP_MESSAGE_MAP[strtolower(trim($rawMessage))] ?? null;
+        }
+
+        return [
+            'error' => $canonical ?? $this->formatError($rawMessage),
+            'code' => is_string($code) ? $code : null,
+            'status' => $res->status(),
+        ];
     }
 
     protected function formatError(mixed $error): string
