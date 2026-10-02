@@ -551,11 +551,26 @@ class FunapiClient extends ZApiClient
     {
         $startTime = microtime(true);
         $endpoint = $this->buildUrl($uid, $token, 'send-button-actions');
+        // FunApi's send-button-actions handler expects `buttons[]` at the top level
+        // with `{id, type, label, url}` items — NOT the Z-API-compatible
+        // `buttonActions[].{type: URL, url, label}` shape. Mirrors the contract
+        // adaptation already applied to sendButtons()/sendOptionList():
+        //  - field is `buttons`, not `buttonActions` (missing `buttons` →
+        //    FunApi 400 "At least one button is required")
+        //  - each button requires an `id`
+        //  - a link button's type is the enum value `cta_url`, not `URL`
+        //  - `url` is required for the `cta_url` type
+        // Label is capped at 25 chars per the provider doc.
         $payload = [
             'phone' => $to,
             'message' => $message,
-            'buttonActions' => [
-                ['type' => 'URL', 'url' => $url, 'label' => $label]
+            'buttons' => [
+                [
+                    'id'    => (string) ($options['buttonId'] ?? uniqid()),
+                    'type'  => 'cta_url',
+                    'label' => mb_substr($label, 0, 25),
+                    'url'   => $url,
+                ],
             ],
         ];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
