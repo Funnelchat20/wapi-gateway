@@ -593,6 +593,64 @@ class FunapiClient extends ZApiClient
         return MessageResource::make($res->json());
     }
 
+    /**
+     * FunApi's send-ptv handler expects the video in the `video` field — NOT the
+     * Z-API-compatible `ptv` field that {@see ZApiClient::sendPtv()} sends. With
+     * `ptv` instead of `video`, FunApi 400s with "Video is required (URL or
+     * base64)". Overridden here (same contract-mismatch fix already applied to
+     * sendButtons()/sendOptionList()/sendButtonLink()) so the monolith's PTV
+     * sends reach FunApi correctly. `video` accepts an HTTPS URL or a base64
+     * data URI. `$options['messageId']` quotes an existing message.
+     */
+    public function sendPtv(string $uid, string $token, string $to, string $videoUrl, array $options = []): array
+    {
+        $startTime = microtime(true);
+        $url = $this->buildUrl($uid, $token, 'send-ptv');
+        $payload = ['phone' => $to, 'video' => $videoUrl];
+        if (isset($options['caption'])) $payload['caption'] = $options['caption'];
+        if (isset($options['viewOnce'])) $payload['viewOnce'] = (bool) $options['viewOnce'];
+        if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
+        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
+        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+        if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
+        $payload = $this->applyQuoteOption($payload, $options);
+        $payload = $this->applyTypingOption($payload, $options);
+
+        $request = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
+            ->timeout((int) ($options['timeout'] ?? config('funapi.timeout', 120)));
+
+        if ($options['retry'] ?? false) {
+            $request = $request->retry(
+                config('funapi.max_attempts', 2),
+                config('funapi.retry_delay', 500),
+                function ($exception, $request) {
+                    // Don't retry on timeout (prevents duplicates)
+                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
+                        str_contains($exception->getMessage(), 'cURL error 28')) {
+                        return false;
+                    }
+                    // Only retry on ConnectionException
+                    return $exception instanceof ConnectionException;
+                },
+                false
+            );
+        }
+
+        $res = $request->post($url, $payload);
+
+        $context = ['phone' => $to, 'has_retry' => $options['retry'] ?? false];
+
+        if ($res->failed() || $res->json('error')) {
+            $error = $this->formatError($res->json('error', 'error'));
+            $context['error'] = $error;
+            $this->logRequest('sendPtv', $uid, $context, $startTime, $res, $url, $payload);
+            return ['error' => $error];
+        }
+
+        $this->logRequest('sendPtv', $uid, $context, $startTime, $res, $url, $payload);
+        return MessageResource::make($res->json());
+    }
+
     public function sendOptionList(string $uid, string $token, string $to, string $message, string $buttonLabel, array $optionsList, array $extra = []): array
     {
         $startTime = microtime(true);
