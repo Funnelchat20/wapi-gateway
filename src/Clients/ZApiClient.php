@@ -725,7 +725,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return array_merge($res->json(), ['queueId' => $res->json('zaapId')]);
     }
 
-    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
+    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components, array $options = []): array
     {
         $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-message'], $this->baseUrl());

@@ -23,7 +23,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     {
         return 'meta';
     }
-    private string $graph = 'https://graph.facebook.com/v20.0/';
+    private string $graph = 'https://graph.facebook.com/v26.0/';
 
     private const TYPING_INDICATOR_TIMEOUT = 5;
 
@@ -142,7 +142,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $url = $this->messagesUrl($uid, $to);
         $payload = [
             'messaging_product' => 'whatsapp',
-            ...$this->recipientField($to),
+            ...$this->recipientField($to, $options),
             'type' => 'text',
             'text' => ['body' => $text],
         ];
@@ -196,7 +196,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $typingResult = $this->fireTypingIndicator($uid, $token, $options);
         $startTime = microtime(true);
         $media = isset($options['mediaId']) ? ['id' => $options['mediaId']] : ['link' => $fileUrl];
-        $payload = ['messaging_product' => 'whatsapp', ...$this->recipientField($to), 'type' => $type, $type => $media];
+        $payload = ['messaging_product' => 'whatsapp', ...$this->recipientField($to, $options), 'type' => $type, $type => $media];
         if (isset($options['fileName']) && $type === 'document') $payload[$type]['filename'] = $options['fileName'];
         if (isset($options['caption']) && in_array($type, ['image', 'video', 'document'])) $payload[$type]['caption'] = $options['caption'];
         $payload = $this->applyQuoteOption($payload, $options);
@@ -404,12 +404,12 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
      * template to a BSUID is the caller's call to avoid — Meta rejects it at
      * send time rather than the payload being built wrong here.
      */
-    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
+    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components, array $options = []): array
     {
         $startTime = microtime(true);
         $payload = [
             'messaging_product' => 'whatsapp',
-            ...$this->recipientField($to),
+            ...$this->recipientField($to, $options),
             'type' => 'template',
             'template' => [
                 'name' => $name,

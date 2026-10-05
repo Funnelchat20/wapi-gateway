@@ -14,7 +14,9 @@ class MessageResource
             // dequeue a still-queued message via deleteQueueMessage(). Null when the
             // provider response doesn't carry one.
             "queueId" => $data['zaapId'] ?? null,
-            "queueNumber" => ""
+            "queueNumber" => "",
+            "status" => $data['status'] ?? null,
+            "whatsAppStatus" => $data['whatsAppStatus'] ?? null,
         ];
     }
 }
