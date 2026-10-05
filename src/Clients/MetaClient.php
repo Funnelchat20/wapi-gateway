@@ -46,12 +46,36 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
      * the phone path byte-identical to what it was before BSUID support — the
      * value is passed through untouched, trimming only on the (new) BSUID
      * branch, where isBsuid() already ignored the padding to classify it.
+     *
+     * A group destination is the third case: Meta addresses it through `to`
+     * like a phone, but only once `recipient_type: group` says so. The caller
+     * declares it with $options[self::RECIPIENT_TYPE_OPTION] — never inferred
+     * from the shape of $to, because a group id is opaque and a heuristic here
+     * would misroute a 1:1 send the day Meta changes that shape.
      */
-    private function recipientField(string $to): array
+    private function recipientField(string $to, array $options = []): array
     {
+        if ($this->isGroupRecipient($options)) {
+            return ['recipient_type' => 'group', 'to' => $to];
+        }
+
         return WhatsAppCloudHelper::isBsuid($to)
             ? ['recipient_type' => 'individual', 'recipient' => trim($to)]
             : ['to' => $to];
+    }
+
+    /**
+     * Opt-in key a caller sets to say "this destination is a group". Kept in
+     * the existing $options bag so no send signature changes for the 1:1
+     * callers, which are every caller that exists today.
+     */
+    public const RECIPIENT_TYPE_OPTION = 'recipientType';
+
+    public const RECIPIENT_TYPE_GROUP = 'group';
+
+    private function isGroupRecipient(array $options): bool
+    {
+        return ($options[self::RECIPIENT_TYPE_OPTION] ?? null) === self::RECIPIENT_TYPE_GROUP;
     }
 
     /**
