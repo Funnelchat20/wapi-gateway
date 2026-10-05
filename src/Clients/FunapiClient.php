@@ -779,7 +779,7 @@ class FunapiClient extends ZApiClient
         return MessageResource::make($res->json());
     }
 
-    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
+    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components, array $options = []): array
     {
         // Templates are a WhatsApp Cloud API feature, not available on whatsmeow-based providers
         return ['error' => 'sendTemplate() is not supported by Funapi provider. Use WhatsApp Cloud API for templates.'];
