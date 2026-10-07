@@ -448,15 +448,31 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return ['paidTill' => date('Y-m-d H:i:s', ($res->json('due') ?? 0) / 1000)];
     }
 
+    /**
+     * Unlike every other client method, `unsubscribe()` historically made its
+     * two HTTP calls (disconnect + integrator cancel) WITHOUT `logRequest()`, so
+     * a failed unsubscribe left no trace in the device log — the record a caller
+     * needs to detect a paid instance that was billed but never actually
+     * cancelled. Each call now logs through the same path as `logout()`; both
+     * URLs carry `/token/<token>/`, which `sanitizeUrl()` masks, so no credential
+     * is persisted. `step` distinguishes the two calls within `method=unsubscribe`.
+     */
     public function unsubscribe(string $uid, string $token): array
     {
         $instanceUid = explode('-', $uid)[0] ?? $uid;
+
+        $startTime = microtime(true);
         $disconnectUrl = str_replace(['UID', 'TOKEN', 'ACTION'], [$instanceUid, $token, 'disconnect'], $this->baseUrl());
         $disc = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->get($disconnectUrl);
+        $this->logRequest('unsubscribe', $uid, $disc->failed() || $disc->json('error') ? ['error' => $disc->json('error', 'error')] : [], $startTime, $disc, $disconnectUrl, ['step' => 'disconnect']);
         if ($disc->failed() || $disc->json('error')) return ['error' => $disc->json('error') ?? 'disconnect_failed'];
+
+        $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN'], [$instanceUid, $token], config("$this->configPrefix.unsubscription_url"));
         $res = Http::withToken(config("$this->configPrefix.token"))->post($url);
+        $this->logRequest('unsubscribe', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, ['step' => 'cancel']);
         if ($res->failed() || $res->json('error')) return ['error' => $res->json('error') ?? 'unsubscribe_failed'];
+
         return ['paidTill' => date('Y-m-d H:i:s', ($res->json('due') ?? 0) / 1000)];
     }
 
