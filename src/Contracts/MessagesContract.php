@@ -53,6 +53,26 @@ namespace Funnelchat\WapiGateway\Contracts;
  * API, 2026) is not documented by Meta and has not been verified against a real
  * WABA; 1:1 is.
  *
+ * sendFile also accepts a `voiceNote` option, which sends an audio as a voice
+ * note (the recorded-message bubble) instead of as an audio file:
+ *
+ *     'voiceNote' => true,
+ *
+ * Absent or false leaves every payload as it was. The option name and the error
+ * codes are wapi's (Funnelchat20/wapi#393):
+ *
+ *   Meta — `audio.voice = true`. Only .ogg/.opus files qualify, because Meta
+ *     requires OGG audio encoded with OPUS.
+ *   z-api / ZApiLite — `waveform: true` on send-audio. Z-API documents no
+ *     push-to-talk flag, and `waveform` is the closest attribute it has.
+ *   funapi — refused with `['error' => 'unsupported', ...]`, because the
+ *     bridge is not verified to honour `waveform`.
+ *
+ * A file that is not audio, or not OGG/OPUS on Meta, comes back as
+ * `['error' => 'invalid_voice_note_file', 'message' => ...]`. Every refusal
+ * happens before any request, so Meta's typing indicator does not fire either.
+ * Read receipts live in their own ReadReceiptsContract.
+ *
  * `sendReaction` acts on an existing message rather than producing a new one, so
  * it is not part of the table above. Unlike the quote option, every provider
  * honors it — the four wire shapes and the meaning of a blank emoji live in that

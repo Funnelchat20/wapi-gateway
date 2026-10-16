@@ -12,12 +12,14 @@ use Funnelchat\WapiGateway\Helpers\WhatsAppCloudHelper;
 use Funnelchat\WapiGateway\Jobs\StoreDeviceLogJob;
 use Funnelchat\WapiGateway\Resources\Meta\MessageResource;
 use Funnelchat\WapiGateway\Resources\Zapi\BusinessProfileResource;
+use Funnelchat\WapiGateway\Traits\HandlesVoiceNoteOption;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Illuminate\Support\Facades\Http;
 
 class MetaClient implements MessagesContract, InstancesContract, ContactsContract, TemplatesContract, ReadReceiptsContract
 {
     use LogsDeviceRequests;
+    use HandlesVoiceNoteOption;
 
     protected function getProviderName(): string
     {
@@ -164,17 +166,43 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     public function updateWebhookReceived(string $uid, string $token, int $userId, int $deviceId, bool $privateMessages = false): array { return []; }
     public function updateWebhookReceivedAndDelivery(string $uid, string $token, int $userId, int $deviceId): array { return []; }
 
+    /**
+     * Meta plays `audio.voice = true` as a voice message only for OGG files
+     * encoded with OPUS. `oga` is missing on purpose: mapType() does not
+     * accept it for Cloud sends at all.
+     */
+    private const VOICE_NOTE_EXTENSIONS = ['ogg', 'opus'];
+
+    /**
+     * `$options['voiceNote'] = true` sends an audio as a voice message
+     * (`audio.voice = true`). Meta requires OGG audio encoded with OPUS for
+     * that, so any other file is refused with `invalid_voice_note_file`
+     * before anything is sent. See
+     * https://developers.facebook.com/docs/whatsapp/cloud-api/messages/audio-messages
+     * (read 2026-10-16): "Set to true if sending a voice message. Voice
+     * messages must be Ogg files encoded with the OPUS codec."
+     */
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $type = $this->mapType($ext);
         if ($type === 'invalid') return ['error' => 'Invalid file extension'];
+        // Validated before the typing indicator, which marks the inbound as
+        // read: a refused voice note must leave no side effect.
+        $voiceNote = $this->wantsVoiceNote($options);
+        if ($voiceNote && $type !== 'audio') {
+            return $this->invalidVoiceNoteFile('A voice note must be an audio file.');
+        }
+        if ($voiceNote && !in_array($ext, self::VOICE_NOTE_EXTENSIONS, true)) {
+            return $this->invalidVoiceNoteFile('WhatsApp Cloud API voice notes must be OGG audio encoded with OPUS (.ogg or .opus).');
+        }
         $typingResult = $this->fireTypingIndicator($uid, $token, $options);
         $startTime = microtime(true);
         $media = isset($options['mediaId']) ? ['id' => $options['mediaId']] : ['link' => $fileUrl];
         $payload = ['messaging_product' => 'whatsapp', ...$this->recipientField($to), 'type' => $type, $type => $media];
         if (isset($options['fileName']) && $type === 'document') $payload[$type]['filename'] = $options['fileName'];
         if (isset($options['caption']) && in_array($type, ['image', 'video', 'document'])) $payload[$type]['caption'] = $options['caption'];
+        if ($voiceNote) $payload['audio']['voice'] = true;
         $payload = $this->applyQuoteOption($payload, $options);
         $url = $this->messagesUrl($uid, $to);
         $res = Http::withToken($token)->post($url, $payload);

@@ -417,12 +417,19 @@ class FunapiClient extends ZApiClient
         return $res->json('participants') ?? [];
     }
 
+    /**
+     * `$options['voiceNote']` is refused here with `unsupported`, as wapi does
+     * (Funnelchat20/wapi#393). The bridge's send-audio has not been verified
+     * to honour Z-API's `waveform`, and a flag that is silently ignored would
+     * deliver a plain audio while reporting success.
+     */
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
         $startTime = microtime(true);
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $action = $this->mapAction($ext);
         if ($action === 'invalid') return ['error' => 'Invalid file extension'];
+        if ($this->wantsVoiceNote($options)) return $this->voiceNoteUnsupported($this->providerDisplayName());
         // Funapi uses endpoints WITHOUT file type suffix: /send-image, /send-document (not /send-document/pdf)
         $attr = $this->mapAttr($ext);
         $params = ['phone' => $to, $attr => $fileUrl];

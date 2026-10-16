@@ -25,6 +25,7 @@ use Funnelchat\WapiGateway\Resources\Zapi\GroupResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CreateGroupResource;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Funnelchat\WapiGateway\Traits\ConfiguresClientProxy;
+use Funnelchat\WapiGateway\Traits\HandlesVoiceNoteOption;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Http\Client\ConnectionException;
@@ -35,6 +36,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 {
     use LogsDeviceRequests;
     use ConfiguresClientProxy;
+    use HandlesVoiceNoteOption;
 
     protected string $configPrefix = 'zapi';
 
@@ -522,6 +524,15 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     /**
      * `$options['messageId']` quotes an existing message, EXCEPT when the file
      * resolves to send-audio — see {@see self::QUOTE_UNSUPPORTED_ACTIONS}.
+     *
+     * `$options['voiceNote'] = true` adds `waveform: true` to send-audio, the
+     * same translation wapi makes (Funnelchat20/wapi#393). Z-API documents no
+     * push-to-talk flag. `waveform` is the closest attribute it has: "Whether
+     * the audio will be sent with sound waves or not"
+     * (https://developer.z-api.io/en/message/send-message-audio, read
+     * 2026-10-16). A file that is not audio is refused with
+     * `invalid_voice_note_file` before anything is sent. Inherited by
+     * ZApiLiteClient.
      */
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
@@ -529,6 +540,10 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $action = $this->mapAction($ext);
         if ($action === 'invalid') return ['error' => 'Invalid file extension'];
+        $voiceNote = $this->wantsVoiceNote($options);
+        if ($voiceNote && $action !== 'send-audio') {
+            return $this->invalidVoiceNoteFile('A voice note must be an audio file (aac, oga, ogg, mp3, m4a, opus or wav).');
+        }
         $quotable = ! in_array($action, self::QUOTE_UNSUPPORTED_ACTIONS, true);
         if ($action === 'send-document') $action = $action . '/' . $ext;
         $attr = $this->mapAttr($ext);
@@ -541,6 +556,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
         if ($quotable) $params = $this->applyQuoteOption($params, $options);
         $params = $this->applyTypingOption($params, $options);
+        if ($voiceNote) $params['waveform'] = true;
 
         // Automatically enable async processing for video files (improves performance and prevents timeouts)
         // Can be explicitly disabled by setting $options['async'] = false
