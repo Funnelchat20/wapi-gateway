@@ -134,6 +134,10 @@ interface MessagesContract
      * mark-as-read call for an inbound message, so $messageId is the wamid of a
      * recent inbound message (within the 24h window). For Z-API/UAZAPI typing is
      * handled server-side via delayTyping and this is a no-op.
+     *
+     * Kept as is for compatibility, including the silent success on QR. A
+     * caller that needs an explicit refusal where no indicator exists should
+     * use ReadReceiptsContract::markMessageAsReadWithTyping().
      */
     public function sendTypingIndicator(string $uid, string $token, string $messageId): array;
     /**

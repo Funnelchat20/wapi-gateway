@@ -7,6 +7,7 @@ use Funnelchat\WapiGateway\Contracts\InstancesContract;
 use Funnelchat\WapiGateway\Contracts\GroupsContract;
 use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\QueueContract;
+use Funnelchat\WapiGateway\Contracts\ReadReceiptsContract;
 use Funnelchat\WapiGateway\Resources\Zapi\MessageResource;
 use Funnelchat\WapiGateway\Resources\Zapi\QrCodeResource;
 use Funnelchat\WapiGateway\Resources\Zapi\MeResource;
@@ -930,6 +931,23 @@ class FunapiClient extends ZApiClient
         $this->logRequest('forwardMessage', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
+    }
+
+    /**
+     * Not inherited from ZApiClient on purpose. The bridge's own API
+     * description (the "FunnelChat API (Whatsmeow Bridge)" Postman collection
+     * in this repo) lists no read-message endpoint, and it publishes no other
+     * docs. Calling the z-api path blindly would turn "not implemented" into
+     * an opaque 404 at best. So this answers UNSUPPORTED without a request,
+     * until the bridge documents one. markMessageAsReadWithTyping() is
+     * inherited and unsupported as well.
+     */
+    public function markMessageAsRead(string $uid, string $token, string $chat, string $messageId): array
+    {
+        return [
+            'error' => ReadReceiptsContract::UNSUPPORTED,
+            'message' => 'FunApi does not support marking a message as read.',
+        ];
     }
 
     /**
