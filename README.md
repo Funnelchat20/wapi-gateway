@@ -144,6 +144,77 @@ if (WapiGateway::messages($provider)->handlesTypingDelayServerSide()) {
 > `delayTyping` se manda igual, pero el endpoint `send-button-actions` no lo
 > documenta: ahí el typing es best-effort.
 
+### Marcar como leído y «escribiendo…» (`ReadReceiptsContract`)
+
+Dos métodos para el visto (los tildes azules) de un mensaje recibido. Viven en
+una interfaz aparte, `ReadReceiptsContract`, y no en `MessagesContract`: así
+nadie que implemente `MessagesContract` tiene que cambiar.
+
+```php
+use Funnelchat\WapiGateway\Contracts\ReadReceiptsContract;
+
+$client = WapiGateway::messages($provider);
+
+if ($client instanceof ReadReceiptsContract) {
+    // $chat: teléfono o id de grupo (Z-API lo exige; Meta lo ignora).
+    $res = $client->markMessageAsRead($uid, $token, $chat, $messageId);
+
+    // Sólo Cloud API: el mismo visto, con «escribiendo…».
+    $res = $client->markMessageAsReadWithTyping($uid, $token, $chat, $wamid);
+}
+
+// ['success' => true]
+// ['error' => ReadReceiptsContract::UNSUPPORTED, 'message' => '...']  (no se mandó nada)
+// ['error' => ...]                                                     (el proveedor lo rechazó)
+```
+
+| Método | Meta | Z-API | Z-API Lite | FunApi |
+|--------|------|-------|------------|--------|
+| `markMessageAsRead()` | ✅ | ✅ | ✅ | ❌ `unsupported` |
+| `markMessageAsReadWithTyping()` | ✅ | ❌ `unsupported` | ❌ `unsupported` | ❌ `unsupported` |
+
+- **Meta**: `POST /{phone_number_id}/messages` con
+  `{"messaging_product":"whatsapp","status":"read","message_id":"<WAMID>"}`. Con
+  «escribiendo…» se agrega `"typing_indicator":{"type":"text"}`. Sólo cuenta como
+  éxito si Meta contesta `{"success": true}`. Meta marca también los mensajes
+  anteriores de la conversación, acepta mensajes de hasta 30 días y quita el
+  indicador cuando el negocio responde o a los 25 segundos. Fuentes:
+  [mark-message-as-read](https://developers.facebook.com/docs/whatsapp/cloud-api/guides/mark-message-as-read)
+  y [typing-indicators](https://developers.facebook.com/docs/whatsapp/cloud-api/typing-indicators).
+- **Z-API / Z-API Lite**: `POST .../read-message` con `{"phone", "messageId"}`,
+  que responde `{"value": true}`
+  ([read-message](https://developer.z-api.io/en/message/read-message)). En QR no
+  hay «escribiendo…» suelto: sólo existe como `delayTyping` de un envío (la
+  opción `typing` de arriba).
+- **FunApi**: la colección del bridge no publica un endpoint de visto, así que
+  se rechaza sin llamar.
+- Nunca lanzan excepción. Si falla la conexión, el error que devuelven tiene el
+  token de la instancia tapado.
+
+`sendTypingIndicator()` sigue igual (en QR devuelve `success` sin hacer nada).
+
+### Nota de voz (`sendFile` con `voiceNote`)
+
+```php
+$res = WapiGateway::messages($provider)->sendFile($uid, $token, $phone, $audioUrl, [
+    'voiceNote' => true,
+]);
+```
+
+| Provider | Qué se manda | Archivos |
+|----------|--------------|----------|
+| Meta | `audio.voice = true` | sólo `.ogg` / `.opus` (OGG con OPUS, regla de Meta) |
+| Z-API / Z-API Lite | `waveform: true` en `send-audio` | cualquier audio |
+| FunApi | — | `['error' => 'unsupported']` |
+
+Es la misma opción, con los mismos códigos de error, que `send-file` de wapi
+(Funnelchat20/wapi#393). Si el archivo no sirve como nota de voz, devuelve
+`['error' => 'invalid_voice_note_file', 'message' => ...]`. Todo rechazo pasa
+antes de cualquier request: en Meta tampoco se dispara el typing. Sin la opción,
+el payload queda byte a byte igual que antes. Z-API no documenta un flag de
+push-to-talk, y `waveform` («Whether the audio will be sent with sound waves or
+not») es lo más cercano.
+
 ### Preview de links (`sendLink`)
 
 | Provider | Tarjeta de preview | Título / descripción / imagen custom |
