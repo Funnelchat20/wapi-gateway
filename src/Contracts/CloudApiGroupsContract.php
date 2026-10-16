@@ -59,9 +59,30 @@ interface CloudApiGroupsContract
 
     public function getGroupJoinRequests(string $uid, string $token, string $groupId): array;
 
-    /** @param string $participant A phone number or a BSUID, same as removeGroupParticipant(). */
-    public function approveGroupJoinRequest(string $uid, string $token, string $groupId, string $participant): array;
+    /**
+     * Approve pending join requests. Each one is identified by the id Meta
+     * gave it: `join_request_id` in getGroupJoinRequests() and in the join
+     * request webhook. A request is not identified by the participant's
+     * phone.
+     *
+     * @param string|string[] $joinRequestIds One id, or several to approve in
+     *   bulk. Blank or non-string entries refuse the whole call before any
+     *   request.
+     * @return array Meta's answer as is. `approved_join_requests` lists the
+     *   approved ids. `failed_join_requests` (`[{join_request_id, errors:
+     *   [{code, message, title, error_data}]}]`) is present only when some
+     *   could not be approved. A partial failure still comes back as HTTP 200,
+     *   so check success per id. `['error' => ...]` when the call itself
+     *   fails.
+     */
+    public function approveGroupJoinRequest(string $uid, string $token, string $groupId, string|array $joinRequestIds): array;
 
-    /** @param string $participant A phone number or a BSUID, same as removeGroupParticipant(). */
-    public function rejectGroupJoinRequest(string $uid, string $token, string $groupId, string $participant): array;
+    /**
+     * Reject pending join requests. Same ids and same answer shape as
+     * approveGroupJoinRequest(), with `rejected_join_requests` in place of
+     * `approved_join_requests`.
+     *
+     * @param string|string[] $joinRequestIds One id, or several to reject in bulk.
+     */
+    public function rejectGroupJoinRequest(string $uid, string $token, string $groupId, string|array $joinRequestIds): array;
 }

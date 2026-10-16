@@ -6,6 +6,7 @@ use Funnelchat\WapiGateway\Clients\MetaClient;
 use Funnelchat\WapiGateway\Providers\WapiServiceProvider;
 use Illuminate\Support\Facades\Http;
 use Orchestra\Testbench\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * CloudApiGroupsContract on MetaClient — WhatsApp Cloud API's native Groups
@@ -20,6 +21,7 @@ class MetaClientCloudApiGroupsTest extends TestCase
     private const PHONE = '5491123456789';
     private const WABA = 'WABA_PHONE_NUMBER_ID';
     private const GROUP_ID = 'GROUP_ID_123';
+    private const JOIN_REQUEST_ID = 'MTY0NjcwNDM1OTU6MTIwMzYzNDA0Njk0MjMzODIw';
 
     protected function getPackageProviders($app): array
     {
@@ -213,35 +215,130 @@ class MetaClientCloudApiGroupsTest extends TestCase
             && str_ends_with($request->url(), self::GROUP_ID . '/join_requests'));
     }
 
-    public function test_approves_a_join_request_by_phone(): void
+    /**
+     * Meta's reference (read 2026-10-16) identifies a join request by its own
+     * id, not by the participant: `{"messaging_product":"whatsapp",
+     * "join_requests":["<JOIN_REQUEST_ID>"]}`. A single string id is exactly
+     * how communities' adapter calls it.
+     */
+    public function test_approves_a_join_request_by_its_id(): void
     {
-        $this->fakeGraph(['success' => true]);
+        $answer = ['messaging_product' => 'whatsapp', 'approved_join_requests' => [self::JOIN_REQUEST_ID]];
+        $this->fakeGraph($answer);
 
-        (new MetaClient())->approveGroupJoinRequest(self::WABA, 'TOKEN', self::GROUP_ID, self::PHONE);
+        $result = (new MetaClient())->approveGroupJoinRequest(self::WABA, 'TOKEN', self::GROUP_ID, self::JOIN_REQUEST_ID);
 
+        $this->assertSame($answer, $result);
+        Http::assertSentCount(1);
         Http::assertSent(fn($request) => $request->method() === 'POST'
-            && str_ends_with(explode('?', $request->url())[0], self::GROUP_ID . '/join_requests')
-            && $request->data() === ['participants' => [['user' => self::PHONE]]]);
+            && $request->url() === 'https://graph.facebook.com/v26.0/' . self::GROUP_ID . '/join_requests'
+            && $request->hasHeader('Authorization', 'Bearer TOKEN')
+            && $request->data() === ['messaging_product' => 'whatsapp', 'join_requests' => [self::JOIN_REQUEST_ID]]);
     }
 
-    public function test_approves_a_join_request_by_bsuid(): void
+    public function test_rejects_a_join_request_by_its_id(): void
     {
-        $this->fakeGraph(['success' => true]);
+        $answer = ['messaging_product' => 'whatsapp', 'rejected_join_requests' => [self::JOIN_REQUEST_ID]];
+        $this->fakeGraph($answer);
 
-        (new MetaClient())->approveGroupJoinRequest(self::WABA, 'TOKEN', self::GROUP_ID, self::BSUID);
+        $result = (new MetaClient())->rejectGroupJoinRequest(self::WABA, 'TOKEN', self::GROUP_ID, self::JOIN_REQUEST_ID);
 
-        Http::assertSent(fn($request) => $request->data() === ['participants' => [['user_id' => self::BSUID]]]);
-    }
-
-    public function test_rejects_a_join_request(): void
-    {
-        $this->fakeGraph(['success' => true]);
-
-        (new MetaClient())->rejectGroupJoinRequest(self::WABA, 'TOKEN', self::GROUP_ID, self::PHONE);
-
+        $this->assertSame($answer, $result);
+        Http::assertSentCount(1);
         Http::assertSent(fn($request) => $request->method() === 'DELETE'
-            && str_ends_with(explode('?', $request->url())[0], self::GROUP_ID . '/join_requests')
-            && $request->data() === ['participants' => [['user' => self::PHONE]]]);
+            && $request->url() === 'https://graph.facebook.com/v26.0/' . self::GROUP_ID . '/join_requests'
+            && $request->data() === ['messaging_product' => 'whatsapp', 'join_requests' => [self::JOIN_REQUEST_ID]]);
+    }
+
+    public static function decisionProvider(): array
+    {
+        return [
+            'approve' => ['approveGroupJoinRequest', 'POST', 'approved_join_requests'],
+            'reject' => ['rejectGroupJoinRequest', 'DELETE', 'rejected_join_requests'],
+        ];
+    }
+
+    /** Bulk in one call. Ids are trimmed and de-duplicated, in order, and an int id travels as a string. */
+    #[DataProvider('decisionProvider')]
+    public function test_decides_several_join_requests_in_one_call(string $method, string $verb, string $confirmedKey): void
+    {
+        $this->fakeGraph(['messaging_product' => 'whatsapp', $confirmedKey => ['JR-1', 'JR-2', '345']]);
+
+        (new MetaClient())->{$method}(self::WABA, 'TOKEN', self::GROUP_ID, [' JR-1 ', 'JR-2', 'JR-1', 345]);
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn($request) => $request->method() === $verb
+            && $request->data() === ['messaging_product' => 'whatsapp', 'join_requests' => ['JR-1', 'JR-2', '345']]);
+    }
+
+    /**
+     * A partial failure is still an HTTP 200, with `failed_join_requests`
+     * next to the confirmed list. It comes back untouched so the caller can
+     * decide per id. It is not flattened into an error.
+     */
+    #[DataProvider('decisionProvider')]
+    public function test_a_partial_failure_comes_back_untouched(string $method, string $verb, string $confirmedKey): void
+    {
+        $answer = [
+            'messaging_product' => 'whatsapp',
+            $confirmedKey => ['JR-1'],
+            'failed_join_requests' => [[
+                'join_request_id' => 'JR-2',
+                'errors' => [[
+                    'code' => 131203,
+                    'message' => '(#131203) Recipient has not accepted our new Terms of Service and Privacy Policy.',
+                    'title' => 'Unable to add participant to group',
+                    'error_data' => ['details' => 'Recipient has not accepted our new Terms of Service and Privacy Policy.'],
+                ]],
+            ]],
+        ];
+        $this->fakeGraph($answer);
+
+        $result = (new MetaClient())->{$method}(self::WABA, 'TOKEN', self::GROUP_ID, ['JR-1', 'JR-2']);
+
+        $this->assertSame($answer, $result);
+    }
+
+    #[DataProvider('decisionProvider')]
+    public function test_a_refused_call_returns_metas_error(string $method): void
+    {
+        $error = ['message' => '(#100) Invalid parameter', 'type' => 'OAuthException', 'code' => 100];
+        $this->fakeGraph(['error' => $error], 400);
+
+        $result = (new MetaClient())->{$method}(self::WABA, 'TOKEN', self::GROUP_ID, self::JOIN_REQUEST_ID);
+
+        $this->assertSame(['error' => $error], $result);
+    }
+
+    public static function invalidIdsProvider(): array
+    {
+        $cases = [
+            'empty string' => [''],
+            'blank string' => ['   '],
+            'empty list' => [[]],
+            'list with a blank id' => [['JR-1', ' ']],
+            'list with a non-scalar id' => [['JR-1', ['JR-2']]],
+            'list with null' => [['JR-1', null]],
+        ];
+        $out = [];
+        foreach (['approveGroupJoinRequest', 'rejectGroupJoinRequest'] as $method) {
+            foreach ($cases as $name => [$ids]) {
+                $out["{$method}: {$name}"] = [$method, $ids];
+            }
+        }
+        return $out;
+    }
+
+    /** Refused before any request: a dropped id would look like Meta's failure. */
+    #[DataProvider('invalidIdsProvider')]
+    public function test_invalid_ids_refuse_the_call_without_a_request(string $method, string|array $ids): void
+    {
+        Http::fake();
+
+        $result = (new MetaClient())->{$method}(self::WABA, 'TOKEN', self::GROUP_ID, $ids);
+
+        $this->assertArrayHasKey('error', $result);
+        Http::assertNothingSent();
     }
 
     /**

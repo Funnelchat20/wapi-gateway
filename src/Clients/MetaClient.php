@@ -815,9 +815,10 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     /**
      * Mirrors recipientField(): Meta identifies a group participant by
-     * `user` (phone) or `user_id` (BSUID), never both. Shared by every
-     * participant-targeting method below (remove, approve, reject) so the
-     * BSUID/phone decision lives in one place.
+     * `user` (phone) or `user_id` (BSUID), never both. Used by
+     * removeGroupParticipant() only. Approving and rejecting a join request
+     * target the request's own id, not the participant (see
+     * decideGroupJoinRequests()).
      */
     private function participantField(string $participant): array
     {
@@ -991,33 +992,85 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return $res->json();
     }
 
-    /** @see removeGroupParticipant() — same unconfirmed body-shape caveat applies. */
-    public function approveGroupJoinRequest(string $uid, string $token, string $groupId, string $participant): array
+    /**
+     * Body and answer confirmed against
+     * https://developers.facebook.com/documentation/business-messaging/whatsapp/groups/reference
+     * (section "Aprobar solicitudes para unirse", read 2026-10-16):
+     *
+     *     POST /<GROUP_ID>/join_requests
+     *     {"messaging_product": "whatsapp", "join_requests": ["<JOIN_REQUEST_ID>", ...]}
+     *     → {"messaging_product": "whatsapp",
+     *        "approved_join_requests": ["<JOIN_REQUEST_ID>", ...],
+     *        "failed_join_requests": [{"join_request_id": ..., "errors": [{code, message, title, error_data}]}]}
+     *
+     * `failed_join_requests` is "Only included if unable to approve one or
+     * more join requests". The answer is returned untouched, so the caller
+     * decides per id.
+     *
+     * @param string|string[] $joinRequestIds
+     */
+    public function approveGroupJoinRequest(string $uid, string $token, string $groupId, string|array $joinRequestIds): array
     {
-        $startTime = microtime(true);
-        $url = $this->groupsUrl($groupId . '/join_requests');
-        $payload = ['participants' => [$this->participantField($participant)]];
-        $res = Http::withToken($token)->post($url, $payload);
-        if ($res->failed()) {
-            $this->logRequest('approveGroupJoinRequest', $uid, ['error' => $res->json('error', 'Failed to approve join request'), 'group_id' => $groupId], $startTime, $res, $url, $payload);
-            return ['error' => $res->json('error', 'Failed to approve join request')];
-        }
-        $this->logRequest('approveGroupJoinRequest', $uid, ['group_id' => $groupId], $startTime, $res, $url, $payload);
-        return $res->json();
+        return $this->decideGroupJoinRequests('approveGroupJoinRequest', 'post', $uid, $token, $groupId, $joinRequestIds, 'Failed to approve join request');
     }
 
-    /** @see removeGroupParticipant() — same unconfirmed body-shape caveat applies. */
-    public function rejectGroupJoinRequest(string $uid, string $token, string $groupId, string $participant): array
+    /**
+     * Same body as approveGroupJoinRequest(), sent with DELETE, per the same
+     * reference (section "Rechazar solicitudes para unirse", read 2026-10-16).
+     * The answer lists `rejected_join_requests`, plus `failed_join_requests`
+     * when some could not be rejected.
+     *
+     * @param string|string[] $joinRequestIds
+     */
+    public function rejectGroupJoinRequest(string $uid, string $token, string $groupId, string|array $joinRequestIds): array
     {
+        return $this->decideGroupJoinRequests('rejectGroupJoinRequest', 'delete', $uid, $token, $groupId, $joinRequestIds, 'Failed to reject join request');
+    }
+
+    /**
+     * Shared by approve (POST) and reject (DELETE): the two differ only in
+     * the verb and in the name of the list Meta answers with.
+     *
+     * @param string|string[] $joinRequestIds
+     */
+    private function decideGroupJoinRequests(string $method, string $verb, string $uid, string $token, string $groupId, string|array $joinRequestIds, string $failure): array
+    {
+        $ids = $this->joinRequestIds($joinRequestIds);
+        if ($ids === null) {
+            return ['error' => 'At least one join request id is required, and every id must be a non-empty string'];
+        }
         $startTime = microtime(true);
         $url = $this->groupsUrl($groupId . '/join_requests');
-        $payload = ['participants' => [$this->participantField($participant)]];
-        $res = Http::withToken($token)->delete($url, $payload);
+        $payload = ['messaging_product' => 'whatsapp', 'join_requests' => $ids];
+        $res = Http::withToken($token)->{$verb}($url, $payload);
+        $context = ['group_id' => $groupId, 'join_request_count' => count($ids)];
         if ($res->failed()) {
-            $this->logRequest('rejectGroupJoinRequest', $uid, ['error' => $res->json('error', 'Failed to reject join request'), 'group_id' => $groupId], $startTime, $res, $url, $payload);
-            return ['error' => $res->json('error', 'Failed to reject join request')];
+            $this->logRequest($method, $uid, ['error' => $res->json('error', $failure)] + $context, $startTime, $res, $url, $payload);
+            return ['error' => $res->json('error', $failure)];
         }
-        $this->logRequest('rejectGroupJoinRequest', $uid, ['group_id' => $groupId], $startTime, $res, $url, $payload);
-        return $res->json();
+        $this->logRequest($method, $uid, $context, $startTime, $res, $url, $payload);
+        return $res->json() ?? [];
+    }
+
+    /**
+     * One id or a list, trimmed and de-duplicated in order. Returns null when
+     * there is nothing to send or an entry is blank or not a string/int.
+     * Refusing the whole call beats silently dropping the bad entry, because
+     * a dropped id would then be missing from Meta's answer and look like a
+     * provider failure.
+     *
+     * @param string|array<mixed> $joinRequestIds
+     * @return list<string>|null
+     */
+    private function joinRequestIds(string|array $joinRequestIds): ?array
+    {
+        $ids = [];
+        foreach ((array) $joinRequestIds as $id) {
+            if (!is_string($id) && !is_int($id)) return null;
+            $id = trim((string) $id);
+            if ($id === '') return null;
+            if (!in_array($id, $ids, true)) $ids[] = $id;
+        }
+        return $ids === [] ? null : $ids;
     }
 }
