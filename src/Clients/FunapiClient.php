@@ -835,6 +835,20 @@ class FunapiClient extends ZApiClient
         return ['error' => 'sendTemplate() is not supported by Funapi provider. Use WhatsApp Cloud API for templates.'];
     }
 
+    /**
+     * The bridge publishes statuses under Z-API's paths, but reads a text
+     * status from `text` (`SendTextStatusRequest` in fun-api's
+     * api/internal/http/handlers/messages.go, v3.112.5), not from Z-API's
+     * `message`: with `message` it answers 400 "Text content is required".
+     *
+     * sendImageStatus() and sendVideoStatus() are inherited as they are: the
+     * bridge takes the same `{image, caption}` and `{video, caption}`.
+     */
+    public function sendTextStatus(string $uid, string $token, string $text, array $options = []): array
+    {
+        return $this->publishStatus('sendTextStatus', $uid, $token, 'send-text-status', ['text' => $text], $options);
+    }
+
     public function createNewsletter(string $uid, string $token, string $name, string $description): array
     {
         $startTime = microtime(true);
