@@ -422,17 +422,23 @@ class FunapiClient extends ZApiClient
      * (Funnelchat20/wapi#393). The bridge's send-audio has not been verified
      * to honour Z-API's `waveform`, and a flag that is silently ignored would
      * deliver a plain audio while reporting success.
+     *
+     * `$options['type']` (image, video, audio, document or sticker) picks the
+     * endpoint without looking at the URL; otherwise the type comes from the
+     * extension of the URL path, or of `fileName` when the path has none (see
+     * ResolvesMediaType). The URL goes out unchanged. No extension is needed
+     * past that: the bridge's endpoints carry no suffix.
      */
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
         $startTime = microtime(true);
-        $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
-        $action = $this->mapAction($ext);
-        if ($action === 'invalid') return ['error' => 'Invalid file extension'];
+        $media = $this->resolveMediaType($fileUrl, $options, fn (string $ext) => $this->mapAttr($ext));
+        if (isset($media['error'])) return ['error' => $media['error']];
+        ['type' => $type, 'ext' => $ext] = $media;
+        $action = 'send-' . $type;
         if ($this->wantsVoiceNote($options)) return $this->voiceNoteUnsupported($this->providerDisplayName());
         // Funapi uses endpoints WITHOUT file type suffix: /send-image, /send-document (not /send-document/pdf)
-        $attr = $this->mapAttr($ext);
-        $params = ['phone' => $to, $attr => $fileUrl];
+        $params = ['phone' => $to, $type => $fileUrl];
         if (isset($options['fileName'])) $params['fileName'] = $options['fileName'];
         if (isset($options['caption'])) $params['caption'] = $options['caption'];
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
@@ -446,7 +452,7 @@ class FunapiClient extends ZApiClient
 
         // Automatically enable async processing for video files (improves performance and prevents timeouts)
         // Can be explicitly disabled by setting $options['async'] = false
-        $isVideo = in_array($ext, ['mp4', 'mov', 'gif']);
+        $isVideo = $type === 'video';
         if ($isVideo && !isset($options['async'])) {
             $params['async'] = true;
         } elseif (isset($options['async'])) {
@@ -998,17 +1004,6 @@ class FunapiClient extends ZApiClient
         $this->logRequest('addContacts', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
-    }
-
-    protected function mapAction(string $ext): string
-    {
-        return [
-            'jpg' => 'send-image', 'jpeg' => 'send-image', 'png' => 'send-image',
-            'gif' => 'send-video', 'mp4' => 'send-video', 'mov' => 'send-video',
-            'aac' => 'send-audio', 'oga' => 'send-audio', 'ogg' => 'send-audio', 'mp3' => 'send-audio', 'm4a' => 'send-audio', 'opus' => 'send-audio', 'wav' => 'send-audio',
-            'pdf' => 'send-document', 'doc' => 'send-document', 'docx' => 'send-document',
-            'svg' => 'send-sticker', 'webp' => 'send-sticker'
-        ][$ext] ?? 'invalid';
     }
 
     protected function mapAttr(string $ext): string
