@@ -785,6 +785,26 @@ class FunapiClient extends ZApiClient
         return ['error' => 'sendTemplate() is not supported by Funapi provider. Use WhatsApp Cloud API for templates.'];
     }
 
+    /**
+     * The Funapi bridge has no status endpoint: the three status methods
+     * inherited from ZApiClient would post to a route that does not exist
+     * here, so they refuse explicitly, without calling out.
+     */
+    public function sendTextStatus(string $uid, string $token, string $text, array $options = []): array
+    {
+        return ['error' => 'sendTextStatus is not supported by Funapi provider'];
+    }
+
+    public function sendImageStatus(string $uid, string $token, string $image, ?string $caption = null, array $options = []): array
+    {
+        return ['error' => 'sendImageStatus is not supported by Funapi provider'];
+    }
+
+    public function sendVideoStatus(string $uid, string $token, string $video, ?string $caption = null, array $options = []): array
+    {
+        return ['error' => 'sendVideoStatus is not supported by Funapi provider'];
+    }
+
     public function createNewsletter(string $uid, string $token, string $name, string $description): array
     {
         $startTime = microtime(true);
