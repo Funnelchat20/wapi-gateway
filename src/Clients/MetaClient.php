@@ -14,12 +14,14 @@ use Funnelchat\WapiGateway\Resources\Meta\MessageResource;
 use Funnelchat\WapiGateway\Resources\Zapi\BusinessProfileResource;
 use Funnelchat\WapiGateway\Traits\HandlesVoiceNoteOption;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
+use Funnelchat\WapiGateway\Traits\ResolvesMediaType;
 use Illuminate\Support\Facades\Http;
 
 class MetaClient implements MessagesContract, InstancesContract, ContactsContract, TemplatesContract, ReadReceiptsContract
 {
     use LogsDeviceRequests;
     use HandlesVoiceNoteOption;
+    use ResolvesMediaType;
 
     protected function getProviderName(): string
     {
@@ -180,13 +182,19 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
      * before anything is sent. See
      * https://developers.facebook.com/docs/whatsapp/cloud-api/messages/audio-messages
      * (read 2026-10-16): "Set to true if sending a voice message. Voice
-     * messages must be Ogg files encoded with the OPUS codec."
+     * messages must be Ogg files encoded with the OPUS codec." The
+     * extension checked is the one {@see ResolvesMediaType} finds: the URL
+     * path's, or `fileName`'s when the path has none.
+     *
+     * `$options['type']` (image, video, audio, document or sticker) is sent
+     * as the message type without looking at the URL; otherwise the type
+     * comes from the extension of the URL path. The URL goes out unchanged.
      */
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
-        $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
-        $type = $this->mapType($ext);
-        if ($type === 'invalid') return ['error' => 'Invalid file extension'];
+        $media = $this->resolveMediaType($fileUrl, $options, fn (string $ext) => $this->mapType($ext));
+        if (isset($media['error'])) return ['error' => $media['error']];
+        ['type' => $type, 'ext' => $ext] = $media;
         // Validated before the typing indicator, which marks the inbound as
         // read: a refused voice note must leave no side effect.
         $voiceNote = $this->wantsVoiceNote($options);
@@ -236,11 +244,16 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         // Validate the header media before firing the typing indicator: the
         // indicator marks the inbound as read, a side effect we must not emit
         // for a send that will never happen.
+        // The extension comes from the URL path, as in sendFile(). An
+        // interactive header takes no sticker, so webp stays refused here.
         $headerType = null;
         if (isset($options['fileUrl'])) {
-            $ext = strtolower(pathinfo($options['fileUrl'], PATHINFO_EXTENSION));
-            $headerType = $this->mapType($ext);
-            if ($headerType === 'invalid') return ['error' => 'Invalid file extension'];
+            $media = $this->resolveMediaType($options['fileUrl'], [], function (string $ext) {
+                $type = $this->mapType($ext);
+                return $type === 'sticker' ? 'invalid' : $type;
+            });
+            if (isset($media['error'])) return ['error' => $media['error']];
+            $headerType = $media['type'];
         }
         $typingResult = $this->fireTypingIndicator($uid, $token, $options);
         $startTime = microtime(true);
