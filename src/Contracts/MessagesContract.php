@@ -73,6 +73,24 @@ namespace Funnelchat\WapiGateway\Contracts;
  * happens before any request, so Meta's typing indicator does not fire either.
  * Read receipts live in their own ReadReceiptsContract.
  *
+ * sendFile takes the URL the integrator gives and sends it unchanged, signed
+ * query included. Its media type comes from a `type` option when given:
+ *
+ *     'type' => 'image', // image | video | audio | document | sticker
+ *
+ * and the URL is then not used to guess it. A blank value counts as absent;
+ * any other value outside the list is refused with
+ * `['error' => 'Invalid file type: expected one of image, video, audio, document, sticker']`.
+ * Without it, the type comes from the extension of the URL path (no query, no
+ * fragment, lowercased), or of the `fileName` option when the path has none,
+ * through each provider's extension map; nothing known is still
+ * `['error' => 'Invalid file extension']`. A URL that resolved before keeps
+ * the request it built, including one whose extension sat in its query
+ * (`.../download?file=a.jpg`). z-api / ZApiLite also need that extension for
+ * `send-document/{ext}`, so a document without one, in the path nor in
+ * `fileName`, is refused. Every refusal happens before any request. See
+ * \Funnelchat\WapiGateway\Traits\ResolvesMediaType.
+ *
  * `sendReaction` acts on an existing message rather than producing a new one, so
  * it is not part of the table above. Unlike the quote option, every provider
  * honors it — the four wire shapes and the meaning of a blank emoji live in that

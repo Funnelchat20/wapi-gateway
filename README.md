@@ -215,6 +215,52 @@ el payload queda byte a byte igual que antes. Z-API no documenta un flag de
 push-to-talk, y `waveform` («Whether the audio will be sent with sound waves or
 not») es lo más cercano.
 
+### Archivos por URL (`sendFile` con `type`)
+
+El integrador pasa una URL y el SDK la manda **tal cual** al proveedor: una URL
+firmada (S3, CloudFront, etc.) conserva su firma.
+
+```php
+$res = WapiGateway::messages($provider)->sendFile($uid, $token, $phone, $fileUrl, [
+    'type'     => 'document',      // opcional: image | video | audio | document | sticker
+    'fileName' => 'Contrato.pdf',  // opcional
+]);
+```
+
+- **Con `type`** el SDK no adivina el tipo por la URL. Vacío o `null` cuenta
+  como ausente; mayúsculas y espacios se ignoran. Cualquier otro valor devuelve
+  `['error' => 'Invalid file type: expected one of image, video, audio, document, sticker']`
+  sin hacer ningún request.
+- **Sin `type`** el tipo sale de la extensión del **path** de la URL, sin query
+  ni fragmento y en minúsculas:
+  `https://b.s3.amazonaws.com/a/foto.JPG?X-Amz-Signature=...` → imagen. Si el
+  path no tiene extensión se usa la de `fileName`. Si nada da una extensión
+  conocida: `['error' => 'Invalid file extension']`, como antes.
+- **Compatibilidad**: una URL que ya funcionaba arma el mismo request, incluso
+  la que traía la extensión sólo en la query (`.../download?file=foto.jpg`). Esa
+  lectura se conserva cuando el path no da una extensión conocida. Sólo cambia
+  una URL cuyo path y cuya query terminan en extensiones conocidas distintas
+  (`doc.pdf?v=foto.png`): ahora manda la del path.
+- **Z-API / Z-API Lite** necesitan la extensión para `send-document/{ext}`. Un
+  documento sin extensión en el path ni en `fileName` devuelve
+  `['error' => 'Z-API needs the file extension to send a document: ...']` sin
+  request. Con `type => 'document'` sirve cualquier extensión (`.xlsx`, etc.).
+  FunApi, UAZAPI y Meta no la necesitan.
+- El `async` automático de Z-API / FunApi se aplica a todo video, también al de
+  `type => 'video'`.
+- En Meta, la nota de voz (`voiceNote`) sigue pidiendo `.ogg` / `.opus`: la
+  extensión del path, o la de `fileName`.
+
+Extensiones que reconoce cada proveedor sin `type`:
+
+| Tipo | Meta | Z-API / Z-API Lite / FunApi | UAZAPI |
+|------|------|-----------------------------|--------|
+| image | jpg, jpeg, png | jpg, jpeg, png | jpg, jpeg, png, gif |
+| video | mp4, 3gp, mov, gif | mp4, mov, gif | mp4, mov, avi, wmv |
+| audio | aac, amr, mp3, m4a, ogg, opus, wav | aac, oga, ogg, mp3, m4a, opus, wav | aac, oga, ogg, mp3, m4a, opus, wav |
+| document | pdf, txt, doc, docx, xls, xlsx, ppt, pptx | pdf, doc, docx | pdf, doc, docx |
+| sticker | webp | webp, svg | webp, svg |
+
 ### Preview de links (`sendLink`)
 
 | Provider | Tarjeta de preview | Título / descripción / imagen custom |
@@ -480,7 +526,7 @@ foreach ($results as $messageId => $result) {
 ### Procesamiento Asíncrono de Videos
 
 ```php
-// Automático para .mp4, .mov, .gif
+// Automático para videos: .mp4, .mov, .gif, o `type => 'video'`
 $response = WapiGateway::messages(ProviderEnum::ZApi)
     ->sendFile($uid, $token, $phone, 'https://example.com/video.mp4', [
         'caption' => 'Mi video',
@@ -734,6 +780,17 @@ class WhatsAppController extends Controller
 ```
 
 ## Changelog
+
+### Sin publicar
+
+**Added:**
+- ✨ `sendFile()` acepta `$options['type']` (`image`, `video`, `audio`, `document`, `sticker`) para URLs sin extensión — ver [Archivos por URL](#archivos-por-url-sendfile-con-type)
+- ✨ Meta reconoce todas las extensiones que acepta la Cloud API: 3gp, amr, txt, xls, xlsx, ppt, pptx y webp (sticker)
+
+**Fixed:**
+- 🐛 `sendFile()` lee la extensión del path de la URL, no de la URL entera: las URLs firmadas (`foto.jpg?X-Amz-Signature=...`) ya no fallan con `Invalid file extension`. Si el path no tiene, usa la de `fileName`
+- 🐛 Z-API / Z-API Lite: un documento sin extensión devuelve un error claro en vez de armar `send-document/` mal
+- 🐛 Meta: el header de `sendButtons()` también lee la extensión del path de la URL
 
 ### v0.3.0 - 2025-XX-XX (En desarrollo)
 
