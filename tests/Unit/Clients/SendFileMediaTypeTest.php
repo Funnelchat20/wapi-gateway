@@ -4,6 +4,7 @@ namespace Funnelchat\WapiGateway\Tests\Unit\Clients;
 
 use Funnelchat\WapiGateway\Clients\FunapiClient;
 use Funnelchat\WapiGateway\Clients\MetaClient;
+use Funnelchat\WapiGateway\Clients\UazapiClient;
 use Funnelchat\WapiGateway\Clients\ZApiClient;
 use Funnelchat\WapiGateway\Clients\ZApiLiteClient;
 use Funnelchat\WapiGateway\Providers\WapiServiceProvider;
@@ -46,6 +47,9 @@ class SendFileMediaTypeTest extends TestCase
             'funapi.base_url' => 'https://funapi.example.com',
             'funapi.client_token' => 'funapi-client-token',
         ]);
+        // The shipped endpoint map, so a repointed /send/media breaks these tests.
+        config(['uazapi' => require dirname(__DIR__, 3) . '/config/uazapi.php']);
+        config(['uazapi.base_url' => 'https://uazapi.example.com']);
 
         Http::fake([
             'https://graph.facebook.com/*' => Http::response(['messages' => [['id' => 'wamid.OUT']]], 200),
@@ -261,7 +265,7 @@ class SendFileMediaTypeTest extends TestCase
         ];
     }
 
-    private function assertZapiRequest(string $url, array $data): void
+    private function assertRequest(string $url, array $data): void
     {
         Http::assertSentCount(1);
         Http::assertSent(fn (Request $request) => $request->url() === $url && $request->data() === $data);
@@ -273,7 +277,7 @@ class SendFileMediaTypeTest extends TestCase
         $result = (new $client())->sendFile('UID', 'TOKEN', self::PHONE, self::SIGNED_JPG);
 
         $this->assertArrayNotHasKey('error', $result);
-        $this->assertZapiRequest("{$baseUrl}/instances/UID/token/TOKEN/send-image", [
+        $this->assertRequest("{$baseUrl}/instances/UID/token/TOKEN/send-image", [
             'phone' => self::PHONE,
             'image' => self::SIGNED_JPG,
         ]);
@@ -287,7 +291,7 @@ class SendFileMediaTypeTest extends TestCase
 
         (new $client())->sendFile('UID', 'TOKEN', self::PHONE, $fileUrl, ['fileName' => 'Contrato.PDF']);
 
-        $this->assertZapiRequest("{$baseUrl}/instances/UID/token/TOKEN/send-document/pdf", [
+        $this->assertRequest("{$baseUrl}/instances/UID/token/TOKEN/send-document/pdf", [
             'phone' => self::PHONE,
             'document' => $fileUrl,
             'fileName' => 'Contrato.PDF',
@@ -301,7 +305,7 @@ class SendFileMediaTypeTest extends TestCase
         $result = (new $client())->sendFile('UID', 'TOKEN', self::PHONE, self::NO_EXTENSION, ['type' => 'video']);
 
         $this->assertArrayNotHasKey('error', $result);
-        $this->assertZapiRequest("{$baseUrl}/instances/UID/token/TOKEN/send-video", [
+        $this->assertRequest("{$baseUrl}/instances/UID/token/TOKEN/send-video", [
             'phone' => self::PHONE,
             'video' => self::NO_EXTENSION,
             'async' => true,
@@ -322,7 +326,7 @@ class SendFileMediaTypeTest extends TestCase
     {
         (new $client())->sendFile('UID', 'TOKEN', self::PHONE, self::NO_EXTENSION, ['type' => 'document', 'fileName' => 'Contrato.docx']);
 
-        $this->assertZapiRequest("{$baseUrl}/instances/UID/token/TOKEN/send-document/docx", [
+        $this->assertRequest("{$baseUrl}/instances/UID/token/TOKEN/send-document/docx", [
             'phone' => self::PHONE,
             'document' => self::NO_EXTENSION,
             'fileName' => 'Contrato.docx',
@@ -335,7 +339,7 @@ class SendFileMediaTypeTest extends TestCase
     {
         (new $client())->sendFile('UID', 'TOKEN', self::PHONE, self::NO_EXTENSION, ['fileName' => 'Contrato.pdf']);
 
-        $this->assertZapiRequest("{$baseUrl}/instances/UID/token/TOKEN/send-document/pdf", [
+        $this->assertRequest("{$baseUrl}/instances/UID/token/TOKEN/send-document/pdf", [
             'phone' => self::PHONE,
             'document' => self::NO_EXTENSION,
             'fileName' => 'Contrato.pdf',
@@ -361,7 +365,7 @@ class SendFileMediaTypeTest extends TestCase
     {
         (new $client())->sendFile('UID', 'TOKEN', self::PHONE, 'https://cdn.example.com/a/planilla.xlsx?sig=1', ['type' => 'document']);
 
-        $this->assertZapiRequest("{$baseUrl}/instances/UID/token/TOKEN/send-document/xlsx", [
+        $this->assertRequest("{$baseUrl}/instances/UID/token/TOKEN/send-document/xlsx", [
             'phone' => self::PHONE,
             'document' => 'https://cdn.example.com/a/planilla.xlsx?sig=1',
         ]);
@@ -372,7 +376,7 @@ class SendFileMediaTypeTest extends TestCase
     {
         (new $client())->sendFile('UID', 'TOKEN', self::PHONE, 'https://cdn.example.com/a/NOTA.MP3');
 
-        $this->assertZapiRequest("{$baseUrl}/instances/UID/token/TOKEN/send-audio", [
+        $this->assertRequest("{$baseUrl}/instances/UID/token/TOKEN/send-audio", [
             'phone' => self::PHONE,
             'audio' => 'https://cdn.example.com/a/NOTA.MP3',
         ]);
@@ -416,7 +420,7 @@ class SendFileMediaTypeTest extends TestCase
     {
         (new ZApiClient())->sendFile('UID', 'TOKEN', self::PHONE, $fileUrl, $options);
 
-        $this->assertZapiRequest("https://zapi.example.com/instances/UID/token/TOKEN/{$action}", $data);
+        $this->assertRequest("https://zapi.example.com/instances/UID/token/TOKEN/{$action}", $data);
     }
 
     // --- FunApi -------------------------------------------------------------
@@ -428,7 +432,7 @@ class SendFileMediaTypeTest extends TestCase
         $result = (new FunapiClient())->sendFile('UID', 'TOKEN', self::PHONE, self::SIGNED_JPG, ['caption' => 'Hola']);
 
         $this->assertArrayNotHasKey('error', $result);
-        $this->assertZapiRequest(self::FUNAPI . 'send-image', [
+        $this->assertRequest(self::FUNAPI . 'send-image', [
             'phone' => self::PHONE,
             'image' => self::SIGNED_JPG,
             'caption' => 'Hola',
@@ -441,7 +445,7 @@ class SendFileMediaTypeTest extends TestCase
         $result = (new FunapiClient())->sendFile('UID', 'TOKEN', self::PHONE, self::NO_EXTENSION, ['type' => 'document']);
 
         $this->assertArrayNotHasKey('error', $result);
-        $this->assertZapiRequest(self::FUNAPI . 'send-document', [
+        $this->assertRequest(self::FUNAPI . 'send-document', [
             'phone' => self::PHONE,
             'document' => self::NO_EXTENSION,
         ]);
@@ -459,7 +463,7 @@ class SendFileMediaTypeTest extends TestCase
     {
         (new FunapiClient())->sendFile('UID', 'TOKEN', self::PHONE, self::NO_EXTENSION, ['fileName' => 'Contrato.pdf']);
 
-        $this->assertZapiRequest(self::FUNAPI . 'send-document', [
+        $this->assertRequest(self::FUNAPI . 'send-document', [
             'phone' => self::PHONE,
             'document' => self::NO_EXTENSION,
             'fileName' => 'Contrato.pdf',
@@ -470,7 +474,7 @@ class SendFileMediaTypeTest extends TestCase
     {
         (new FunapiClient())->sendFile('UID', 'TOKEN', self::PHONE, 'https://cdn.example.com/a/CLIP.MP4');
 
-        $this->assertZapiRequest(self::FUNAPI . 'send-video', [
+        $this->assertRequest(self::FUNAPI . 'send-video', [
             'phone' => self::PHONE,
             'video' => 'https://cdn.example.com/a/CLIP.MP4',
             'async' => true,
@@ -510,6 +514,90 @@ class SendFileMediaTypeTest extends TestCase
     {
         (new FunapiClient())->sendFile('UID', 'TOKEN', self::PHONE, $fileUrl, $options);
 
-        $this->assertZapiRequest(self::FUNAPI . $action, $data);
+        $this->assertRequest(self::FUNAPI . $action, $data);
+    }
+
+    // --- UAZAPI -------------------------------------------------------------
+
+    private function uazapiSend(string $fileUrl, array $options = []): array
+    {
+        return (new UazapiClient())->sendFile('UID', 'TOKEN', self::PHONE, $fileUrl, $options);
+    }
+
+    private function assertUazapiPayload(array $data): void
+    {
+        $this->assertRequest('https://uazapi.example.com/send/media', $data);
+    }
+
+    public function test_uazapi_sends_a_signed_url_with_the_extension_in_its_path(): void
+    {
+        $result = $this->uazapiSend(self::SIGNED_JPG, ['caption' => 'Hola']);
+
+        $this->assertArrayNotHasKey('error', $result);
+        $this->assertUazapiPayload(['number' => self::PHONE, 'type' => 'image', 'file' => self::SIGNED_JPG, 'text' => 'Hola']);
+    }
+
+    public function test_uazapi_sends_a_url_without_extension_with_the_type_option(): void
+    {
+        $result = $this->uazapiSend(self::NO_EXTENSION, ['type' => 'audio']);
+
+        $this->assertArrayNotHasKey('error', $result);
+        $this->assertUazapiPayload(['number' => self::PHONE, 'type' => 'audio', 'file' => self::NO_EXTENSION]);
+    }
+
+    public function test_uazapi_refuses_a_url_without_extension_nor_type(): void
+    {
+        $result = $this->uazapiSend(self::NO_EXTENSION);
+
+        $this->assertSame(['error' => 'Invalid file extension'], $result);
+        Http::assertNothingSent();
+    }
+
+    public function test_uazapi_guesses_a_document_from_the_file_name(): void
+    {
+        $this->uazapiSend(self::NO_EXTENSION, ['fileName' => 'Contrato.pdf']);
+
+        $this->assertUazapiPayload(['number' => self::PHONE, 'type' => 'document', 'file' => self::NO_EXTENSION, 'docName' => 'Contrato.pdf']);
+    }
+
+    public function test_uazapi_reads_an_uppercase_extension(): void
+    {
+        $this->uazapiSend('https://cdn.example.com/a/STICKER.WEBP');
+
+        $this->assertUazapiPayload(['number' => self::PHONE, 'type' => 'sticker', 'file' => 'https://cdn.example.com/a/STICKER.WEBP']);
+    }
+
+    public function test_uazapi_refuses_an_invalid_type(): void
+    {
+        $result = $this->uazapiSend(self::SIGNED_JPG, ['type' => 'myaudio']);
+
+        $this->assertSame(['error' => self::INVALID_TYPE], $result);
+        Http::assertNothingSent();
+    }
+
+    public static function uazapiUnchangedProvider(): array
+    {
+        return [
+            'gif is an image here' => ['https://cdn.example.com/a/anim.gif', [], ['number' => self::PHONE, 'type' => 'image', 'file' => 'https://cdn.example.com/a/anim.gif']],
+            'document with name, caption and delay' => [
+                'https://cdn.example.com/a/doc.pdf',
+                ['fileName' => 'doc.pdf', 'caption' => 'Ver', 'delayMessage' => 2],
+                ['number' => self::PHONE, 'type' => 'document', 'file' => 'https://cdn.example.com/a/doc.pdf', 'text' => 'Ver', 'docName' => 'doc.pdf', 'delay' => 2],
+            ],
+            'video' => ['https://cdn.example.com/a/clip.avi', [], ['number' => self::PHONE, 'type' => 'video', 'file' => 'https://cdn.example.com/a/clip.avi']],
+            'extension only in the query' => [
+                'https://cdn.example.com/download?file=nota.opus',
+                [],
+                ['number' => self::PHONE, 'type' => 'audio', 'file' => 'https://cdn.example.com/download?file=nota.opus'],
+            ],
+        ];
+    }
+
+    #[DataProvider('uazapiUnchangedProvider')]
+    public function test_uazapi_request_for_a_url_that_already_worked_is_unchanged(string $fileUrl, array $options, array $data): void
+    {
+        $this->uazapiSend($fileUrl, $options);
+
+        $this->assertUazapiPayload($data);
     }
 }
