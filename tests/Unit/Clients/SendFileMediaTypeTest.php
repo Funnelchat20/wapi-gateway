@@ -174,6 +174,48 @@ class SendFileMediaTypeTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public static function metaExtensionProvider(): array
+    {
+        return [
+            'jpg' => ['jpg', 'image'], 'jpeg' => ['jpeg', 'image'], 'png' => ['png', 'image'],
+            'mp4' => ['mp4', 'video'], '3gp' => ['3gp', 'video'], 'gif' => ['gif', 'video'], 'mov' => ['mov', 'video'],
+            'aac' => ['aac', 'audio'], 'amr' => ['amr', 'audio'], 'mp3' => ['mp3', 'audio'], 'm4a' => ['m4a', 'audio'],
+            'ogg' => ['ogg', 'audio'], 'opus' => ['opus', 'audio'], 'wav' => ['wav', 'audio'],
+            'pdf' => ['pdf', 'document'], 'txt' => ['txt', 'document'], 'doc' => ['doc', 'document'], 'docx' => ['docx', 'document'],
+            'xls' => ['xls', 'document'], 'xlsx' => ['xlsx', 'document'], 'ppt' => ['ppt', 'document'], 'pptx' => ['pptx', 'document'],
+            'webp' => ['webp', 'sticker'],
+        ];
+    }
+
+    #[DataProvider('metaExtensionProvider')]
+    public function test_meta_maps_every_extension_the_cloud_api_accepts(string $ext, string $type): void
+    {
+        $fileUrl = "https://cdn.example.com/a/file.{$ext}?sig=1";
+
+        $result = $this->metaSend($fileUrl);
+
+        $this->assertArrayNotHasKey('error', $result);
+        $this->assertMetaPayload(['type' => $type, $type => ['link' => $fileUrl]]);
+    }
+
+    /** A sticker takes no caption, as before for audio. */
+    public function test_meta_sends_a_sticker_without_caption(): void
+    {
+        $this->metaSend('https://cdn.example.com/a/sticker.webp', ['caption' => 'ignored']);
+
+        $this->assertMetaPayload(['type' => 'sticker', 'sticker' => ['link' => 'https://cdn.example.com/a/sticker.webp']]);
+    }
+
+    public function test_meta_button_header_refuses_a_sticker(): void
+    {
+        $result = (new MetaClient())->sendButtons('PHONE_NUMBER_ID', 'META_TOKEN', self::PHONE, 'Elegí', [
+            ['id' => 'a', 'label' => 'A'],
+        ], ['fileUrl' => 'https://cdn.example.com/a/sticker.webp']);
+
+        $this->assertSame(['error' => 'Invalid file extension'], $result);
+        Http::assertNothingSent();
+    }
+
     public function test_meta_button_header_reads_the_extension_from_the_path(): void
     {
         $result = (new MetaClient())->sendButtons('PHONE_NUMBER_ID', 'META_TOKEN', self::PHONE, 'Elegí', [

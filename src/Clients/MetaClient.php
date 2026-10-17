@@ -444,13 +444,22 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return MessageResource::make($res->json());
     }
 
+    /**
+     * The extensions of the media types the Cloud API accepts (image: jpeg,
+     * png; video: mp4, 3gp; audio: aac, amr, mp3, m4a, ogg; document: txt,
+     * xls(x), doc(x), ppt(x), pdf; sticker: webp). gif, mov, opus and wav
+     * predate that list and keep their mapping, so no URL that resolved
+     * before stops resolving.
+     */
     private function mapType(string $ext): string
     {
         return [
             'jpg' => 'image', 'jpeg' => 'image', 'png' => 'image',
-            'gif' => 'video', 'mp4' => 'video', 'mov' => 'video',
-            'mp3' => 'audio', 'ogg' => 'audio', 'aac' => 'audio', 'm4a' => 'audio', 'opus' => 'audio', 'wav' => 'audio',
-            'pdf' => 'document', 'doc' => 'document', 'docx' => 'document'
+            'gif' => 'video', 'mp4' => 'video', 'mov' => 'video', '3gp' => 'video',
+            'mp3' => 'audio', 'ogg' => 'audio', 'aac' => 'audio', 'm4a' => 'audio', 'opus' => 'audio', 'wav' => 'audio', 'amr' => 'audio',
+            'pdf' => 'document', 'doc' => 'document', 'docx' => 'document', 'txt' => 'document',
+            'xls' => 'document', 'xlsx' => 'document', 'ppt' => 'document', 'pptx' => 'document',
+            'webp' => 'sticker',
         ][$ext] ?? 'invalid';
     }
 
