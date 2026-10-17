@@ -244,7 +244,7 @@ $res = WapiGateway::messages($provider)->sendFile($uid, $token, $phone, $fileUrl
 - **Z-API / Z-API Lite** necesitan la extensión para `send-document/{ext}`. Un
   documento sin extensión en el path ni en `fileName` devuelve
   `['error' => 'Z-API needs the file extension to send a document: ...']` sin
-  request. Con `type => 'document'` sirve cualquier extensión (`.xlsx`, etc.).
+  request. Con `type => 'document'` sirve cualquier extensión (`.odt`, etc.).
   FunApi, UAZAPI y Meta no la necesitan.
 - El `async` automático de Z-API / FunApi se aplica a todo video, también al de
   `type => 'video'`.
@@ -258,7 +258,7 @@ Extensiones que reconoce cada proveedor sin `type`:
 | image | jpg, jpeg, png | jpg, jpeg, png | jpg, jpeg, png, gif |
 | video | mp4, 3gp, mov, gif | mp4, mov, gif | mp4, mov, avi, wmv |
 | audio | aac, amr, mp3, m4a, ogg, opus, wav | aac, oga, ogg, mp3, m4a, opus, wav | aac, oga, ogg, mp3, m4a, opus, wav |
-| document | pdf, txt, doc, docx, xls, xlsx, ppt, pptx | pdf, doc, docx | pdf, doc, docx |
+| document | pdf, txt, doc, docx, xls, xlsx, ppt, pptx | pdf, doc, docx, xls, xlsx, ppt, pptx, csv, txt | pdf, doc, docx, xls, xlsx, ppt, pptx, csv, txt |
 | sticker | webp | webp, svg | webp, svg |
 
 ### Preview de links (`sendLink`)
@@ -791,6 +791,7 @@ class WhatsAppController extends Controller
 - 🐛 `sendFile()` lee la extensión del path de la URL, no de la URL entera: las URLs firmadas (`foto.jpg?X-Amz-Signature=...`) ya no fallan con `Invalid file extension`. Si el path no tiene, usa la de `fileName`
 - 🐛 Z-API / Z-API Lite: un documento sin extensión devuelve un error claro en vez de armar `send-document/` mal
 - 🐛 Meta: el header de `sendButtons()` también lee la extensión del path de la URL
+- 🐛 Z-API, Z-API Lite, FunApi y UAZAPI mandan como documento `.xls`, `.xlsx`, `.ppt`, `.pptx`, `.csv` y `.txt` sin necesitar `type` (#82). Meta no adivina `.csv`: la Cloud API no lo lista entre sus tipos de documento
 
 ### v0.3.0 - 2025-XX-XX (En desarrollo)
 

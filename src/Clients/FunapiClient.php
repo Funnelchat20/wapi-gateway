@@ -1013,6 +1013,7 @@ class FunapiClient extends ZApiClient
             'gif' => 'video', 'mp4' => 'video', 'mov' => 'video',
             'aac' => 'audio', 'oga' => 'audio', 'ogg' => 'audio', 'mp3' => 'audio', 'm4a' => 'audio', 'opus' => 'audio', 'wav' => 'audio',
             'pdf' => 'document', 'doc' => 'document', 'docx' => 'document',
+            'xls' => 'document', 'xlsx' => 'document', 'ppt' => 'document', 'pptx' => 'document', 'csv' => 'document', 'txt' => 'document',
             'svg' => 'sticker', 'webp' => 'sticker'
         ][$ext] ?? 'invalid';
     }

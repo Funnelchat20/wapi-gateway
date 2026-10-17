@@ -514,6 +514,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
             'jpg' => 'image', 'jpeg' => 'image', 'png' => 'image', 'gif' => 'image',
             'webp' => 'sticker', 'svg' => 'sticker',
             'pdf' => 'document', 'doc' => 'document', 'docx' => 'document',
+            'xls' => 'document', 'xlsx' => 'document', 'ppt' => 'document', 'pptx' => 'document', 'csv' => 'document', 'txt' => 'document',
             'mp3' => 'audio', 'ogg' => 'audio', 'aac' => 'audio', 'm4a' => 'audio', 'opus' => 'audio', 'oga' => 'audio', 'wav' => 'audio',
             'mp4' => 'video', 'mov' => 'video', 'avi' => 'video', 'wmv' => 'video'
         ][$ext] ?? 'invalid';

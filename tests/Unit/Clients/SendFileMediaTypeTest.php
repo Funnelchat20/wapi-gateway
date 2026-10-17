@@ -222,6 +222,19 @@ class SendFileMediaTypeTest extends TestCase
         $this->assertMetaPayload(['type' => 'sticker', 'sticker' => ['link' => 'https://cdn.example.com/a/sticker.webp']]);
     }
 
+    /**
+     * The Cloud API lists no CSV among its document types (txt, xls, xlsx,
+     * doc, docx, ppt, pptx, pdf), so Meta does not guess one, unlike the QR
+     * providers (Funnelchat20/wapi-gateway#82).
+     */
+    public function test_meta_still_refuses_a_csv_without_type(): void
+    {
+        $result = $this->metaSend('https://cdn.example.com/a/reporte.csv');
+
+        $this->assertSame(['error' => 'Invalid file extension'], $result);
+        Http::assertNothingSent();
+    }
+
     public function test_meta_button_header_refuses_a_sticker(): void
     {
         $result = (new MetaClient())->sendButtons('PHONE_NUMBER_ID', 'META_TOKEN', self::PHONE, 'Elegí', [
@@ -363,11 +376,45 @@ class SendFileMediaTypeTest extends TestCase
     #[DataProvider('zapiFamilyProvider')]
     public function test_zapi_sends_a_typed_document_with_an_extension_it_does_not_guess(string $client, string $baseUrl): void
     {
-        (new $client())->sendFile('UID', 'TOKEN', self::PHONE, 'https://cdn.example.com/a/planilla.xlsx?sig=1', ['type' => 'document']);
+        (new $client())->sendFile('UID', 'TOKEN', self::PHONE, 'https://cdn.example.com/a/planilla.ods?sig=1', ['type' => 'document']);
 
-        $this->assertRequest("{$baseUrl}/instances/UID/token/TOKEN/send-document/xlsx", [
+        $this->assertRequest("{$baseUrl}/instances/UID/token/TOKEN/send-document/ods", [
             'phone' => self::PHONE,
-            'document' => 'https://cdn.example.com/a/planilla.xlsx?sig=1',
+            'document' => 'https://cdn.example.com/a/planilla.ods?sig=1',
+        ]);
+    }
+
+    /** Funnelchat20/wapi-gateway#82: office and text documents, guessed without `type`. */
+    public static function qrDocumentExtensionProvider(): array
+    {
+        return [
+            'xls' => ['xls'], 'xlsx' => ['xlsx'], 'ppt' => ['ppt'], 'pptx' => ['pptx'], 'csv' => ['csv'], 'txt' => ['txt'],
+        ];
+    }
+
+    public static function zapiDocumentExtensionProvider(): array
+    {
+        $cases = [];
+        foreach (self::zapiFamilyProvider() as $provider => [$client, $baseUrl]) {
+            foreach (self::qrDocumentExtensionProvider() as $ext => [$extension]) {
+                $cases["{$provider} {$ext}"] = [$client, $baseUrl, $extension];
+            }
+        }
+
+        return $cases;
+    }
+
+    #[DataProvider('zapiDocumentExtensionProvider')]
+    public function test_zapi_sends_an_office_or_text_document_without_type(string $client, string $baseUrl, string $ext): void
+    {
+        $fileUrl = "https://cdn.example.com/a/reporte.{$ext}";
+
+        $result = (new $client())->sendFile('UID', 'TOKEN', self::PHONE, $fileUrl);
+
+        $this->assertArrayNotHasKey('error', $result);
+        $this->assertRequest("{$baseUrl}/instances/UID/token/TOKEN/send-document/{$ext}", [
+            'phone' => self::PHONE,
+            'document' => $fileUrl,
         ]);
     }
 
@@ -509,6 +556,20 @@ class SendFileMediaTypeTest extends TestCase
         ];
     }
 
+    #[DataProvider('qrDocumentExtensionProvider')]
+    public function test_funapi_sends_an_office_or_text_document_without_type(string $ext): void
+    {
+        $fileUrl = "https://cdn.example.com/a/reporte.{$ext}";
+
+        $result = (new FunapiClient())->sendFile('UID', 'TOKEN', self::PHONE, $fileUrl);
+
+        $this->assertArrayNotHasKey('error', $result);
+        $this->assertRequest(self::FUNAPI . 'send-document', [
+            'phone' => self::PHONE,
+            'document' => $fileUrl,
+        ]);
+    }
+
     #[DataProvider('funapiUnchangedProvider')]
     public function test_funapi_request_for_a_url_that_already_worked_is_unchanged(string $fileUrl, array $options, string $action, array $data): void
     {
@@ -591,6 +652,17 @@ class SendFileMediaTypeTest extends TestCase
                 ['number' => self::PHONE, 'type' => 'audio', 'file' => 'https://cdn.example.com/download?file=nota.opus'],
             ],
         ];
+    }
+
+    #[DataProvider('qrDocumentExtensionProvider')]
+    public function test_uazapi_sends_an_office_or_text_document_without_type(string $ext): void
+    {
+        $fileUrl = "https://cdn.example.com/a/reporte.{$ext}";
+
+        $result = $this->uazapiSend($fileUrl);
+
+        $this->assertArrayNotHasKey('error', $result);
+        $this->assertUazapiPayload(['number' => self::PHONE, 'type' => 'document', 'file' => $fileUrl]);
     }
 
     #[DataProvider('uazapiUnchangedProvider')]
