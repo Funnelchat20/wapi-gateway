@@ -64,6 +64,18 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     protected const QUOTE_UNSUPPORTED_ACTIONS = ['send-audio'];
 
     /**
+     * Z-API does not reuse one key for editing: each media endpoint names its
+     * own. `send-audio` and `send-sticker` are absent because those messages
+     * have no caption to edit — their absence is what makes
+     * {@see self::sendFile()} refuse instead of posting a second file.
+     */
+    protected const EDIT_CAPTION_FIELDS = [
+        'send-image' => 'editImageMessageId',
+        'send-video' => 'editVideoMessageId',
+        'send-document' => 'editDocumentMessageId',
+    ];
+
+    /**
      * `$options['messageId']` quotes an existing message — see
      * {@see self::applyQuoteOption()}. Works in groups.
      *
@@ -135,6 +147,29 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     public function editMessage(string $uid, string $token, string $phone, string $messageId, string $text): array
     {
         return $this->sendText($uid, $token, $phone, $text, ['editMessageId' => $messageId]);
+    }
+
+    /**
+     * Rewrites the caption of an image, video or document already sent to
+     * `$phone`. Same 15-minute WhatsApp window as `editMessage()`, same
+     * no-clock-of-our-own stance: past it the provider rejects.
+     *
+     * `$fileUrl` is not optional padding — Z-API models a caption edit as the
+     * original send repeated with an edit id, so the media field is required
+     * and the URL has to be the one already sent. The extension also selects
+     * the endpoint and therefore which edit key Z-API expects
+     * ({@see self::EDIT_CAPTION_FIELDS}); pass the file the caption belongs
+     * to, not a re-encoded copy.
+     *
+     * Audio and stickers have no caption: those come back as an error rather
+     * than a second file in the chat.
+     */
+    public function editCaption(string $uid, string $token, string $phone, string $messageId, string $fileUrl, string $caption): array
+    {
+        return $this->sendFile($uid, $token, $phone, $fileUrl, [
+            'editMessageId' => $messageId,
+            'caption' => $caption,
+        ]);
     }
 
     public function create(int $userId, int $deviceId, ?string $countryCode = null): array
@@ -532,6 +567,11 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     /**
      * `$options['messageId']` quotes an existing message, EXCEPT when the file
      * resolves to send-audio — see {@see self::QUOTE_UNSUPPORTED_ACTIONS}.
+     *
+     * `$options['editMessageId']` rewrites the caption of that already-sent
+     * media instead of sending a new file — see {@see self::editCaption()}.
+     * Same deliberate split as in `sendText()`: `messageId` quotes,
+     * `editMessageId` edits.
      */
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
@@ -540,9 +580,20 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $action = $this->mapAction($ext);
         if ($action === 'invalid') return ['error' => 'Invalid file extension'];
         $quotable = ! in_array($action, self::QUOTE_UNSUPPORTED_ACTIONS, true);
+
+        // Resolved before the send-document suffix below, which is not an action
+        // key. A caption edit on a type that has no caption is refused here
+        // rather than sent: dropping the key would post a second file instead.
+        $editField = null;
+        if (isset($options['editMessageId'])) {
+            $editField = self::EDIT_CAPTION_FIELDS[$action] ?? null;
+            if ($editField === null) return ['error' => "Caption edit is not supported for $action"];
+        }
+
         if ($action === 'send-document') $action = $action . '/' . $ext;
         $attr = $this->mapAttr($ext);
         $params = ['phone' => $to, $attr => $fileUrl];
+        if ($editField !== null) $params[$editField] = (string) $options['editMessageId'];
         if (isset($options['fileName'])) $params['fileName'] = $options['fileName'];
         if (isset($options['caption'])) $params['caption'] = $options['caption'];
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
