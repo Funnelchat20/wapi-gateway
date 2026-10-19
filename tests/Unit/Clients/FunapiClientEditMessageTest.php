@@ -77,4 +77,44 @@ class FunapiClientEditMessageTest extends TestCase
         });
         Http::assertSentCount(1);
     }
+
+    /**
+     * Same inheritance hazard as editMessage(): this class overrides
+     * sendFile() too, so an inherited editCaption() would post a second file.
+     */
+    public function test_edit_caption_sends_nothing_at_all(): void
+    {
+        $this->fakeFunapi();
+
+        (new FunapiClient())->editCaption('UID', 'TOKEN', '120363000000000000-group', 'MSG-1', 'https://cdn.example.com/foto.jpg', 'Nueva');
+
+        Http::assertNothingSent();
+    }
+
+    public function test_edit_caption_refuses_with_a_classified_error(): void
+    {
+        $this->fakeFunapi();
+
+        $result = (new FunapiClient())->editCaption('UID', 'TOKEN', '5491100000000', 'MSG-1', 'https://cdn.example.com/foto.jpg', 'Nueva');
+
+        $this->assertSame('editCaption is not supported by Funapi provider', $result['error'] ?? null);
+        $this->assertArrayNotHasKey('id', $result);
+    }
+
+    /** Plain media sends are untouched by the override. */
+    public function test_send_file_still_works_and_carries_no_edit_key(): void
+    {
+        $this->fakeFunapi();
+
+        (new FunapiClient())->sendFile('UID', 'TOKEN', '5491100000000', 'https://cdn.example.com/foto.jpg', ['caption' => 'Hola']);
+
+        Http::assertSent(function ($request) {
+            foreach (['editMessageId', 'editImageMessageId', 'editVideoMessageId', 'editDocumentMessageId'] as $key) {
+                if (array_key_exists($key, $request->data())) return false;
+            }
+
+            return true;
+        });
+        Http::assertSentCount(1);
+    }
 }

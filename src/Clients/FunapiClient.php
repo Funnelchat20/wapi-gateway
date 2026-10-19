@@ -1365,6 +1365,22 @@ class FunapiClient extends ZApiClient
     }
 
     /**
+     * Refused for the same reason as `editMessage()` above, and with the same
+     * inheritance hazard: this class overrides `sendFile()` too, so the
+     * inherited `editCaption()` would drop the edit key and post a SECOND
+     * image, video or document into the chat, reporting success.
+     *
+     * Whatsgo's own OpenAPI (3.112.5) has no caption-edit field on any of its
+     * media endpoints — the same sweep that found no `editMessageId` on
+     * `send-text` found no `editImageMessageId`/`editVideoMessageId`/
+     * `editDocumentMessageId` either.
+     */
+    public function editCaption(string $uid, string $token, string $phone, string $messageId, string $fileUrl, string $caption): array
+    {
+        return ['error' => 'editCaption is not supported by Funapi provider'];
+    }
+
+    /**
      * Funapi's `code` field -> this bridge's canonical error vocabulary.
      *
      * The `code` is the ONLY discriminating field on a group operation failure:
