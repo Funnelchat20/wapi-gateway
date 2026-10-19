@@ -96,6 +96,10 @@ class FunapiClient extends ZApiClient
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
         if (isset($options['messageId']) && trim((string) $options['messageId']) !== '') $payload['messageId'] = (string) $options['messageId'];
+        // Mirrors ZApiClient: `messageId` quotes, `editMessageId` rewrites the
+        // sent message. Carried here because this override would otherwise drop
+        // it — see editMessage()'s note on what whatsgo has yet to confirm.
+        if (isset($options['editMessageId'])) $payload['editMessageId'] = (string) $options['editMessageId'];
         $payload = $this->applyTypingOption($payload, $options);
 
         $request = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
@@ -422,9 +426,19 @@ class FunapiClient extends ZApiClient
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $action = $this->mapAction($ext);
         if ($action === 'invalid') return ['error' => 'Invalid file extension'];
+
+        // Same per-type edit key as ZApiClient. Funapi needs no equivalent of
+        // the send-document suffix, so the action maps straight through.
+        $editField = null;
+        if (isset($options['editMessageId'])) {
+            $editField = self::EDIT_CAPTION_FIELDS[$action] ?? null;
+            if ($editField === null) return ['error' => "Caption edit is not supported for $action"];
+        }
+
         // Funapi uses endpoints WITHOUT file type suffix: /send-image, /send-document (not /send-document/pdf)
         $attr = $this->mapAttr($ext);
         $params = ['phone' => $to, $attr => $fileUrl];
+        if ($editField !== null) $params[$editField] = (string) $options['editMessageId'];
         if (isset($options['fileName'])) $params['fileName'] = $options['fileName'];
         if (isset($options['caption'])) $params['caption'] = $options['caption'];
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
@@ -1337,6 +1351,38 @@ class FunapiClient extends ZApiClient
     {
         return ['error' => 'deleteMessageForMe is not supported by Funapi provider'];
     }
+
+    /*
+     * -------------------------------------------------------------------
+     * Editing a sent message: ASSUMED, NOT VERIFIED
+     * -------------------------------------------------------------------
+     *
+     * `editMessage()` and `editCaption()` are inherited from ZApiClient and
+     * now work here, because `sendText()` and `sendFile()` above carry the
+     * edit keys. They are built on the assumption that whatsgo mirrors the
+     * Z-API shape — `editMessageId` on send-text, and the per-type
+     * `editImageMessageId`/`editVideoMessageId`/`editDocumentMessageId` on
+     * media. Nothing confirms that yet.
+     *
+     * What IS established, from whatsgo's own OpenAPI 3.112.5 (2026-10-19):
+     * none of those keys appears anywhere in the document, on any endpoint.
+     * The only edit it exposes is `send-edit-event`, for events. `isEdit`
+     * exists solely on the inbound `ReceivedCallbackPayload` — whatsgo can
+     * report an edit it received, not perform one.
+     *
+     * The risk this leaves open, stated plainly: whatsgo's request bodies are
+     * permissive, and the measured precedent is that it accepts Z-API fields
+     * and ignores them in silence — `messageId`, the quote option it does
+     * document, returns 200 `queued` and delivers the message unquoted (5/5
+     * sends across 2 instances, 2026-10-06, against 28/28 honoured on z-api).
+     * If `editMessageId` is likewise ignored, an edit is not an error: it is a
+     * SECOND message posted to the customer's group, reported as a success.
+     *
+     * So this must not reach a release until Funnelchat20/fun-api#211 is
+     * answered. If the answer is no, or the shape differs, revert to the
+     * explicit refusal this replaced.
+     */
+
 
     /**
      * Funapi's `code` field -> this bridge's canonical error vocabulary.
