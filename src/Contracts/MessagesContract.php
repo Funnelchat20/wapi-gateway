@@ -69,7 +69,7 @@ interface MessagesContract
     public function sendPoll(string $uid, string $token, string $to, string $message, array $pollOptions, array $options = []): array;
     public function sendLink(string $uid, string $token, string $to, string $message, string $linkUrl, array $options = []): array;
     public function sendEvent(string $uid, string $token, string $toGroupPhone, array $event, array $options = []): array;
-    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array;
+    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components, array $options = []): array;
     public function sendPtv(string $uid, string $token, string $to, string $videoUrl, array $options = []): array;
     public function pinMessage(string $uid, string $token, string $phone, string $messageId, string $duration): array;
     /**

@@ -474,7 +474,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return $this->sendText($uid, $token, $toGroupPhone, $text, $options);
     }
 
-    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
+    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components, array $options = []): array
     {
         return ['error' => 'Not supported'];
     }
