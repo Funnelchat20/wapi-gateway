@@ -1339,6 +1339,32 @@ class FunapiClient extends ZApiClient
     }
 
     /**
+     * Same reasoning as `deleteMessageForMe()` above, except the inherited
+     * version was actively harmful rather than merely unverified.
+     *
+     * ZApiClient::editMessage() is `sendText()` carrying `editMessageId`, and
+     * this class overrides `sendText()` without that key. Inherited unchanged,
+     * an edit therefore reached whatsgo as a plain send: a SECOND message in
+     * the group instead of the first one rewritten — and it came back as a
+     * success, so the caller recorded the message as edited.
+     *
+     * Teaching this client's `sendText()` the key would not fix it either.
+     * Whatsgo has no public API docs, and the measured precedent is that it
+     * accepts Z-API fields and ignores them in silence: `messageId` (the quote
+     * option) returns 200 `queued` and delivers the message unquoted. An
+     * ignored `editMessageId` lands on exactly the duplicate-message outcome
+     * this override exists to prevent, only harder to see.
+     *
+     * So: refuse, loudly, until whatsgo's support for editing is verified. A
+     * classified error is recoverable; a duplicate in a customer's group is
+     * not.
+     */
+    public function editMessage(string $uid, string $token, string $phone, string $messageId, string $text): array
+    {
+        return ['error' => 'editMessage is not supported by Funapi provider'];
+    }
+
+    /**
      * Funapi's `code` field -> this bridge's canonical error vocabulary.
      *
      * The `code` is the ONLY discriminating field on a group operation failure:
