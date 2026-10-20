@@ -73,6 +73,15 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
 
     public const RECIPIENT_TYPE_GROUP = 'group';
 
+    /**
+     * Extensions sent as a Cloud API `document`: only the types Meta lists as
+     * supported document media (txt, PDF, Word, Excel, PowerPoint). Narrower
+     * than {@see ZApiClient::DOCUMENT_EXTENSIONS} on purpose — csv, archives,
+     * OpenDocument, rtf and epub are not officially supported by Meta and
+     * would fail at the provider, so `mapType()` answers `invalid` for them.
+     */
+    public const DOCUMENT_EXTENSIONS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt'];
+
     private function isGroupRecipient(array $options): bool
     {
         return ($options[self::RECIPIENT_TYPE_OPTION] ?? null) === self::RECIPIENT_TYPE_GROUP;
@@ -433,8 +442,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'jpg' => 'image', 'jpeg' => 'image', 'png' => 'image',
             'gif' => 'video', 'mp4' => 'video', 'mov' => 'video',
             'mp3' => 'audio', 'ogg' => 'audio', 'aac' => 'audio', 'm4a' => 'audio', 'opus' => 'audio', 'wav' => 'audio',
-            'pdf' => 'document', 'doc' => 'document', 'docx' => 'document'
-        ][$ext] ?? 'invalid';
+        ][$ext] ?? (in_array($ext, self::DOCUMENT_EXTENSIONS, true) ? 'document' : 'invalid');
     }
 
     public function sendPtv(string $uid, string $token, string $to, string $videoUrl, array $options = []): array

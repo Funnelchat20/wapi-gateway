@@ -64,6 +64,17 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     protected const QUOTE_UNSUPPORTED_ACTIONS = ['send-audio'];
 
     /**
+     * Extensions sent as a document (`send-document/{ext}` on z-api). Office,
+     * OpenDocument, plain text, e-book and archive formats only — executables
+     * and scripts (exe, bat, apk, msi, sh, js, ...) are deliberately absent so
+     * `mapAction()` keeps answering `invalid` for them.
+     */
+    public const DOCUMENT_EXTENSIONS = [
+        'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv',
+        'zip', 'rar', '7z', 'odt', 'ods', 'odp', 'rtf', 'epub',
+    ];
+
+    /**
      * `$options['messageId']` quotes an existing message — see
      * {@see self::applyQuoteOption()}. Works in groups.
      *
@@ -532,6 +543,9 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     /**
      * `$options['messageId']` quotes an existing message, EXCEPT when the file
      * resolves to send-audio — see {@see self::QUOTE_UNSUPPORTED_ACTIONS}.
+     *
+     * `$options['waveform']` (send-audio only, see {@see self::applyWaveformOption()})
+     * asks the provider to render the audio as a voice note with a waveform.
      */
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
@@ -550,6 +564,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
         if ($quotable) $params = $this->applyQuoteOption($params, $options);
+        $params = $this->applyWaveformOption($params, $action, $options);
         $params = $this->applyTypingOption($params, $options);
 
         // Automatically enable async processing for video files (improves performance and prevents timeouts)
@@ -783,9 +798,8 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
             'jpg' => 'send-image', 'jpeg' => 'send-image', 'png' => 'send-image',
             'gif' => 'send-video', 'mp4' => 'send-video', 'mov' => 'send-video',
             'aac' => 'send-audio', 'oga' => 'send-audio', 'ogg' => 'send-audio', 'mp3' => 'send-audio', 'm4a' => 'send-audio', 'opus' => 'send-audio', 'wav' => 'send-audio',
-            'pdf' => 'send-document', 'doc' => 'send-document', 'docx' => 'send-document',
             'svg' => 'send-sticker', 'webp' => 'send-sticker'
-        ][$ext] ?? 'invalid';
+        ][$ext] ?? (in_array($ext, static::DOCUMENT_EXTENSIONS, true) ? 'send-document' : 'invalid');
     }
 
     protected function mapAttr(string $ext): string
@@ -794,9 +808,22 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
             'jpg' => 'image', 'jpeg' => 'image', 'png' => 'image',
             'gif' => 'video', 'mp4' => 'video', 'mov' => 'video',
             'aac' => 'audio', 'oga' => 'audio', 'ogg' => 'audio', 'mp3' => 'audio', 'm4a' => 'audio', 'opus' => 'audio', 'wav' => 'audio',
-            'pdf' => 'document', 'doc' => 'document', 'docx' => 'document',
             'svg' => 'sticker', 'webp' => 'sticker'
-        ][$ext] ?? 'invalid';
+        ][$ext] ?? (in_array($ext, static::DOCUMENT_EXTENSIONS, true) ? 'document' : 'invalid');
+    }
+
+    /**
+     * z-api's send-audio takes `waveform: true` to deliver the audio as a voice
+     * note with its waveform. Accepts a bool or the caller's sampled waveform
+     * (a non-empty array): the provider computes the bars itself, so only the
+     * intent is forwarded. Ignored on every other action.
+     */
+    protected function applyWaveformOption(array $params, string $action, array $options): array
+    {
+        if ($action !== 'send-audio' || ! array_key_exists('waveform', $options)) return $params;
+        $waveform = $options['waveform'];
+        $params['waveform'] = is_array($waveform) ? $waveform !== [] : (bool) $waveform;
+        return $params;
     }
 
     public function groups(string $uid, string $token, array $options = []): array
@@ -1340,6 +1367,26 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $this->logRequest('groupInvitationLink', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
+    }
+
+    /**
+     * Revokes the group's current invitation link and returns the new one
+     * (z-api `POST redefine-invitation-link/{groupId}`), normalized to
+     * `['invitationLink' => string]` like {@see self::groupInvitationLink()}.
+     * The connected number must be a group admin. Not in `GroupsContract`
+     * (Uazapi has no equivalent yet): callers should guard with method_exists.
+     */
+    public function resetGroupInvitationLink(string $uid, string $token, string $groupId): array
+    {
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'redefine-invitation-link/' . $groupId . '-group'], $this->baseUrl());
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->timeout(config("$this->configPrefix.timeout", 60))->post($url);
+        $failed = $res->failed() || $res->json('error') || $res->json('success') === false;
+        $this->logRequest('resetGroupInvitationLink', $uid, $failed ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url);
+        if ($failed) return ['error' => $this->formatError($res->json('error', 'error'))];
+        $link = $res->json('invitationLink') ?? $res->json('link');
+        if (! is_string($link) || $link === '') return ['error' => 'Invitation link missing from provider response'];
+        return ['invitationLink' => $link];
     }
 
     public function lightGroupMetadata(string $uid, string $token, string $groupId): array
