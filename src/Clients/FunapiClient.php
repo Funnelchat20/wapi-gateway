@@ -470,6 +470,7 @@ class FunapiClient extends ZApiClient
         if (! in_array($action, self::QUOTE_UNSUPPORTED_ACTIONS, true)) {
             $params = $this->applyQuoteOption($params, $options);
         }
+        $params = $this->applyWaveformOption($params, $action, $options);
         $params = $this->applyTypingOption($params, $options);
 
         // Automatically enable async processing for video files (improves performance and prevents timeouts)
@@ -1017,9 +1018,8 @@ class FunapiClient extends ZApiClient
             'jpg' => 'send-image', 'jpeg' => 'send-image', 'png' => 'send-image',
             'gif' => 'send-video', 'mp4' => 'send-video', 'mov' => 'send-video',
             'aac' => 'send-audio', 'oga' => 'send-audio', 'ogg' => 'send-audio', 'mp3' => 'send-audio', 'm4a' => 'send-audio', 'opus' => 'send-audio', 'wav' => 'send-audio',
-            'pdf' => 'send-document', 'doc' => 'send-document', 'docx' => 'send-document',
             'svg' => 'send-sticker', 'webp' => 'send-sticker'
-        ][$ext] ?? 'invalid';
+        ][$ext] ?? (in_array($ext, static::DOCUMENT_EXTENSIONS, true) ? 'send-document' : 'invalid');
     }
 
     protected function mapAttr(string $ext): string
@@ -1028,9 +1028,8 @@ class FunapiClient extends ZApiClient
             'jpg' => 'image', 'jpeg' => 'image', 'png' => 'image',
             'gif' => 'video', 'mp4' => 'video', 'mov' => 'video',
             'aac' => 'audio', 'oga' => 'audio', 'ogg' => 'audio', 'mp3' => 'audio', 'm4a' => 'audio', 'opus' => 'audio', 'wav' => 'audio',
-            'pdf' => 'document', 'doc' => 'document', 'docx' => 'document',
             'svg' => 'sticker', 'webp' => 'sticker'
-        ][$ext] ?? 'invalid';
+        ][$ext] ?? (in_array($ext, static::DOCUMENT_EXTENSIONS, true) ? 'document' : 'invalid');
     }
 
     public function groups(string $uid, string $token, array $options = []): array
@@ -1372,6 +1371,16 @@ class FunapiClient extends ZApiClient
     public function deleteMessageForMe(string $uid, string $token, string $messageId, string $phone, bool $owner): array
     {
         return ['error' => 'deleteMessageForMe is not supported by Funapi provider'];
+    }
+
+    /**
+     * Same reasoning as {@see self::deleteMessageForMe()}: z-api's
+     * redefine-invitation-link is not known to exist on this backend, so the
+     * inherited method is refused instead of sent blind.
+     */
+    public function resetGroupInvitationLink(string $uid, string $token, string $groupId): array
+    {
+        return ['error' => 'resetGroupInvitationLink is not supported by Funapi provider'];
     }
 
     /**
