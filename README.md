@@ -321,10 +321,26 @@ capacidades no es compatible (sin add-admin, sin comunidades/newsletters, con jo
 | `approveGroupJoinRequest()` | ✅ |
 | `rejectGroupJoinRequest()` | ✅ |
 
-> ⚠️ El endpoint/método existe y está implementado contra la referencia pública de Meta, pero
-> el body exacto de `removeGroupParticipant()`, `approveGroupJoinRequest()` y
-> `rejectGroupJoinRequest()` (array `participants` con `user`/`user_id`) no está confirmado
-> contra la referencia completa del Graph API — validar contra un número Cloud API Groups real
+**Solicitudes de unión.** `approveGroupJoinRequest()` y `rejectGroupJoinRequest()` reciben el
+id de la solicitud (`join_request_id`, el que trae `getGroupJoinRequests()` o el webhook), no el
+participante. Aceptan uno o varios ids:
+
+```php
+$res = $meta->approveGroupJoinRequest($phoneNumberId, $token, $groupId, $joinRequestId);
+$res = $meta->rejectGroupJoinRequest($phoneNumberId, $token, $groupId, [$id1, $id2]);
+```
+
+Mandan `{"messaging_product":"whatsapp","join_requests":[...]}`: `POST` para aprobar y `DELETE`
+para rechazar, a `/{group_id}/join_requests`. Devuelven la respuesta de Meta tal cual:
+`approved_join_requests` o `rejected_join_requests` (lista de ids), y además
+`failed_join_requests` (`[{join_request_id, errors:[{code, message, title, error_data}]}]`)
+cuando alguna falló. Un fallo parcial sigue siendo HTTP 200: confirmar id por id. Un id vacío o
+que no es string rechaza la llamada entera sin mandar nada. Fuente:
+[groups/reference](https://developers.facebook.com/documentation/business-messaging/whatsapp/groups/reference),
+leída el 2026-10-16.
+
+> ⚠️ El body exacto de `removeGroupParticipant()` (array `participants` con `user`/`user_id`)
+> sigue sin confirmar contra una llamada real. Validar contra un número Cloud API Groups real
 > antes de depender de esto en producción.
 
 ### 📇 Contactos
@@ -696,7 +712,8 @@ class WhatsAppController extends Controller
 
 **Added:**
 - ✨ `CloudApiGroupsContract` — WhatsApp Cloud API Groups nativo (Meta, Official Business Account): `createGroup()`, `deleteGroup()`, `group()`, `groups()`, `updateGroupSettings()`, `getGroupInviteLink()`, `resetGroupInviteLink()`, `sendGroupInviteTemplate()`, `removeGroupParticipant()`, `getGroupJoinRequests()`, `approveGroupJoinRequest()`, `rejectGroupJoinRequest()`. Implementado en `MetaClient`. Contrato deliberadamente separado de `GroupsContract` (ver sección "Grupos API oficial" arriba) — no lo implementan Z-API/UAZAPI/Funapi.
-- ⚠️ El body de `removeGroupParticipant()`/`approveGroupJoinRequest()`/`rejectGroupJoinRequest()` sigue la convención habitual de Meta (`participants: [{user|user_id}]`) pero no está confirmado contra la referencia completa del Graph API — validar contra un número real antes de depender de esto en producción.
+- 🔧 `approveGroupJoinRequest()`/`rejectGroupJoinRequest()` reciben ids de solicitud (`string|string[]`) en vez de un participante, y mandan `{"messaging_product":"whatsapp","join_requests":[...]}` según la referencia de Meta. **Cambio de firma** respecto de `v0.23.0-beta.5`.
+- ⚠️ El body de `removeGroupParticipant()` sigue la convención habitual de Meta (`participants: [{user|user_id}]`) pero no está confirmado contra una llamada real — validar contra un número real antes de depender de esto en producción.
 
 ### v0.3.0 - 2025-XX-XX (En desarrollo)
 
