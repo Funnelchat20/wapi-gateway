@@ -6,18 +6,21 @@ use Funnelchat\WapiGateway\Contracts\MessagesContract;
 use Funnelchat\WapiGateway\Contracts\InstancesContract;
 use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\TemplatesContract;
+use Funnelchat\WapiGateway\Contracts\ReadReceiptsContract;
 use Funnelchat\WapiGateway\Helpers\BucketFile;
 use Funnelchat\WapiGateway\Contracts\CloudApiGroupsContract;
 use Funnelchat\WapiGateway\Helpers\WhatsAppCloudHelper;
 use Funnelchat\WapiGateway\Jobs\StoreDeviceLogJob;
 use Funnelchat\WapiGateway\Resources\Meta\MessageResource;
 use Funnelchat\WapiGateway\Resources\Zapi\BusinessProfileResource;
+use Funnelchat\WapiGateway\Traits\HandlesVoiceNoteOption;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Illuminate\Support\Facades\Http;
 
-class MetaClient implements MessagesContract, InstancesContract, ContactsContract, TemplatesContract, CloudApiGroupsContract
+class MetaClient implements MessagesContract, InstancesContract, ContactsContract, TemplatesContract, ReadReceiptsContract, CloudApiGroupsContract
 {
     use LogsDeviceRequests;
+    use HandlesVoiceNoteOption;
 
     protected function getProviderName(): string
     {
@@ -188,17 +191,43 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     public function updateWebhookReceived(string $uid, string $token, int $userId, int $deviceId, bool $privateMessages = false): array { return []; }
     public function updateWebhookReceivedAndDelivery(string $uid, string $token, int $userId, int $deviceId): array { return []; }
 
+    /**
+     * Meta plays `audio.voice = true` as a voice message only for OGG files
+     * encoded with OPUS. `oga` is missing on purpose: mapType() does not
+     * accept it for Cloud sends at all.
+     */
+    private const VOICE_NOTE_EXTENSIONS = ['ogg', 'opus'];
+
+    /**
+     * `$options['voiceNote'] = true` sends an audio as a voice message
+     * (`audio.voice = true`). Meta requires OGG audio encoded with OPUS for
+     * that, so any other file is refused with `invalid_voice_note_file`
+     * before anything is sent. See
+     * https://developers.facebook.com/docs/whatsapp/cloud-api/messages/audio-messages
+     * (read 2026-10-16): "Set to true if sending a voice message. Voice
+     * messages must be Ogg files encoded with the OPUS codec."
+     */
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $type = $this->mapType($ext);
         if ($type === 'invalid') return ['error' => 'Invalid file extension'];
+        // Validated before the typing indicator, which marks the inbound as
+        // read: a refused voice note must leave no side effect.
+        $voiceNote = $this->wantsVoiceNote($options);
+        if ($voiceNote && $type !== 'audio') {
+            return $this->invalidVoiceNoteFile('A voice note must be an audio file.');
+        }
+        if ($voiceNote && !in_array($ext, self::VOICE_NOTE_EXTENSIONS, true)) {
+            return $this->invalidVoiceNoteFile('WhatsApp Cloud API voice notes must be OGG audio encoded with OPUS (.ogg or .opus).');
+        }
         $typingResult = $this->fireTypingIndicator($uid, $token, $options);
         $startTime = microtime(true);
         $media = isset($options['mediaId']) ? ['id' => $options['mediaId']] : ['link' => $fileUrl];
         $payload = ['messaging_product' => 'whatsapp', ...$this->recipientField($to, $options), 'type' => $type, $type => $media];
         if (isset($options['fileName']) && $type === 'document') $payload[$type]['filename'] = $options['fileName'];
         if (isset($options['caption']) && in_array($type, ['image', 'video', 'document'])) $payload[$type]['caption'] = $options['caption'];
+        if ($voiceNote) $payload['audio']['voice'] = true;
         $payload = $this->applyQuoteOption($payload, $options);
         $url = $this->messagesUrl($uid, $to);
         $res = Http::withToken($token)->post($url, $payload);
@@ -527,6 +556,82 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             return ['error' => $res->json('error', 'Failed to send typing indicator')];
         }
         $this->logRequest('sendTypingIndicator', $uid, ['message_id' => $messageId], $startTime, $res, $url, $payload);
+        return ['success' => true];
+    }
+
+    /**
+     * Cloud API read receipt, confirmed against
+     * https://developers.facebook.com/docs/whatsapp/cloud-api/guides/mark-message-as-read
+     * (read 2026-10-16):
+     *
+     *     POST /<PHONE_NUMBER_ID>/messages
+     *     {"messaging_product": "whatsapp", "status": "read", "message_id": "<WAMID>"}
+     *     → {"success": true}
+     *
+     * "When you mark a message as read, the API also marks earlier messages in
+     * the conversation as read." Meta only accepts messages received in the
+     * last 30 days, and answers 131009 for an id that is not a received wamid.
+     * $chat is not part of the payload: the wamid locates the message.
+     */
+    public function markMessageAsRead(string $uid, string $token, string $chat, string $messageId): array
+    {
+        return $this->postReadReceipt('markMessageAsRead', $uid, $token, $messageId, false);
+    }
+
+    /**
+     * The same read receipt with `typing_indicator`, per
+     * https://developers.facebook.com/docs/whatsapp/cloud-api/typing-indicators
+     * (read 2026-10-16): `"typing_indicator": {"type": "text"}` on the body
+     * above, same `{"success": true}` answer. It marks the message as read
+     * too. "The typing indicator will be dismissed once you respond, or after
+     * 25 seconds, whichever comes first."
+     *
+     * Same wire as sendTypingIndicator(), which stays as it was. This one
+     * belongs to ReadReceiptsContract and is stricter: it only reports
+     * success when Meta answers `success: true`.
+     */
+    public function markMessageAsReadWithTyping(string $uid, string $token, string $chat, string $messageId): array
+    {
+        return $this->postReadReceipt('markMessageAsReadWithTyping', $uid, $token, $messageId, true);
+    }
+
+    /**
+     * Same bound as the typing indicator: a read receipt is one small call,
+     * and a caller that waits on it should not hang on a slow Graph.
+     */
+    private const READ_RECEIPT_TIMEOUT = 5;
+
+    /**
+     * Never throws. Success requires a 2xx AND `success: true`, which is what
+     * Meta documents as the confirmation. Any other answer is an error that
+     * carries Meta's own `error` object when there is one.
+     */
+    private function postReadReceipt(string $method, string $uid, string $token, string $messageId, bool $withTyping): array
+    {
+        if (trim($messageId) === '') {
+            return ['error' => 'A message id is required'];
+        }
+        $startTime = microtime(true);
+        $url = $this->graph . $uid . '/messages';
+        $payload = [
+            'messaging_product' => 'whatsapp',
+            'status' => 'read',
+            'message_id' => $messageId,
+        ];
+        if ($withTyping) $payload['typing_indicator'] = ['type' => 'text'];
+        try {
+            $res = Http::withToken($token)->timeout(self::READ_RECEIPT_TIMEOUT)->post($url, $payload);
+        } catch (\Throwable $e) {
+            $error = $this->sanitizeUrl($e->getMessage());
+            $this->logRequest($method, $uid, ['error' => $error, 'message_id' => $messageId], $startTime, null, $url, $payload);
+            return ['error' => $error];
+        }
+        if ($res->failed() || $res->json('success') !== true) {
+            $error = $res->json('error') ?? 'Read receipt not confirmed by the provider';
+            $this->logRequest($method, $uid, ['error' => $error, 'message_id' => $messageId], $startTime, $res, $url, $payload);
+            return ['error' => $error];
+        }
+        $this->logRequest($method, $uid, ['message_id' => $messageId], $startTime, $res, $url, $payload);
         return ['success' => true];
     }
 

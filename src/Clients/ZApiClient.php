@@ -7,6 +7,7 @@ use Funnelchat\WapiGateway\Contracts\InstancesContract;
 use Funnelchat\WapiGateway\Contracts\GroupsContract;
 use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\QueueContract;
+use Funnelchat\WapiGateway\Contracts\ReadReceiptsContract;
 use Funnelchat\WapiGateway\Resources\Zapi\MessageResource;
 use Funnelchat\WapiGateway\Resources\Zapi\QrCodeResource;
 use Funnelchat\WapiGateway\Resources\Zapi\ExtensionTokenResource;
@@ -24,22 +25,38 @@ use Funnelchat\WapiGateway\Resources\Zapi\GroupResource;
 use Funnelchat\WapiGateway\Resources\Zapi\CreateGroupResource;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Funnelchat\WapiGateway\Traits\ConfiguresClientProxy;
+use Funnelchat\WapiGateway\Traits\HandlesVoiceNoteOption;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response as ClientResponse;
 
-class ZApiClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract
+class ZApiClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract, ReadReceiptsContract
 {
     use LogsDeviceRequests;
     use ConfiguresClientProxy;
+    use HandlesVoiceNoteOption;
 
     protected string $configPrefix = 'zapi';
 
     protected function getProviderName(): string
     {
         return 'zapi';
+    }
+
+    /**
+     * The provider's name as a person reads it, for error messages.
+     * getProviderName() cannot serve: it answers `zapi` for Z-API Lite too,
+     * because both share a device-log bucket.
+     */
+    protected function providerDisplayName(): string
+    {
+        return match ($this->configPrefix) {
+            'zapi-lite' => 'Z-API Lite',
+            'funapi' => 'FunApi',
+            default => 'Z-API',
+        };
     }
 
     protected function baseUrl(): string
@@ -532,6 +549,15 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     /**
      * `$options['messageId']` quotes an existing message, EXCEPT when the file
      * resolves to send-audio — see {@see self::QUOTE_UNSUPPORTED_ACTIONS}.
+     *
+     * `$options['voiceNote'] = true` adds `waveform: true` to send-audio, the
+     * same translation wapi makes (Funnelchat20/wapi#393). Z-API documents no
+     * push-to-talk flag. `waveform` is the closest attribute it has: "Whether
+     * the audio will be sent with sound waves or not"
+     * (https://developer.z-api.io/en/message/send-message-audio, read
+     * 2026-10-16). A file that is not audio is refused with
+     * `invalid_voice_note_file` before anything is sent. Inherited by
+     * ZApiLiteClient.
      */
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
@@ -539,6 +565,10 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $action = $this->mapAction($ext);
         if ($action === 'invalid') return ['error' => 'Invalid file extension'];
+        $voiceNote = $this->wantsVoiceNote($options);
+        if ($voiceNote && $action !== 'send-audio') {
+            return $this->invalidVoiceNoteFile('A voice note must be an audio file (aac, oga, ogg, mp3, m4a, opus or wav).');
+        }
         $quotable = ! in_array($action, self::QUOTE_UNSUPPORTED_ACTIONS, true);
         if ($action === 'send-document') $action = $action . '/' . $ext;
         $attr = $this->mapAttr($ext);
@@ -551,6 +581,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
         if ($quotable) $params = $this->applyQuoteOption($params, $options);
         $params = $this->applyTypingOption($params, $options);
+        if ($voiceNote) $params['waveform'] = true;
 
         // Automatically enable async processing for video files (improves performance and prevents timeouts)
         // Can be explicitly disabled by setting $options['async'] = false
@@ -1510,6 +1541,71 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     public function handlesTypingDelayServerSide(): bool
     {
         return true;
+    }
+
+    /**
+     * Z-API read receipt, per https://developer.z-api.io/en/message/read-message
+     * (read 2026-10-16):
+     *
+     *     POST /instances/{instanceId}/token/{token}/read-message
+     *     {"phone": "5511999998888", "messageId": "3999984263738042930CD6ECDE9VDWSA"}
+     *     → 200 {"value": true}
+     *
+     * `phone` is the chat: a phone, or a group id for a group message. An
+     * earlier version of the same page answered 204 with no body, so an empty
+     * 2xx counts as success too. Only an explicit `value: false` is read as a
+     * refusal.
+     *
+     * Inherited by ZApiLiteClient: Z-API Lite is the same API under its own
+     * base_url and Client-Token (default host api.z-api.io). Not verified
+     * against a real Lite instance. FunapiClient overrides it.
+     */
+    public function markMessageAsRead(string $uid, string $token, string $chat, string $messageId): array
+    {
+        if (trim($chat) === '' || trim($messageId) === '') {
+            return ['error' => 'A chat and a message id are required'];
+        }
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'read-message'], $this->baseUrl());
+        $payload = ['phone' => $chat, 'messageId' => $messageId];
+        try {
+            $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
+                ->timeout(config("$this->configPrefix.timeout", 60))
+                ->post($url, $payload);
+        } catch (\Throwable $e) {
+            // The exception text embeds the URL, and the URL embeds the
+            // instance token.
+            $error = $this->sanitizeUrl($e->getMessage());
+            $this->logRequest('markMessageAsRead', $uid, ['error' => $error, 'phone' => $chat], $startTime, null, $url, $payload);
+            return ['error' => $error];
+        }
+        if ($res->failed() || $res->json('error')) {
+            $error = $this->formatError($res->json('error', 'error'));
+            $this->logRequest('markMessageAsRead', $uid, ['error' => $error, 'phone' => $chat], $startTime, $res, $url, $payload);
+            return ['error' => $error];
+        }
+        if ($res->json('value') === false) {
+            $error = 'Read receipt not confirmed by the provider';
+            $this->logRequest('markMessageAsRead', $uid, ['error' => $error, 'phone' => $chat], $startTime, $res, $url, $payload);
+            return ['error' => $error];
+        }
+        $this->logRequest('markMessageAsRead', $uid, ['phone' => $chat], $startTime, $res, $url, $payload);
+        return ['success' => true];
+    }
+
+    /**
+     * Z-API has no standalone typing call. "Typing…" exists only as the
+     * `delayTyping` of a send (see applyTypingOption()). So this answers
+     * UNSUPPORTED and sends nothing, and in particular does not mark the
+     * message as read on the way. Inherited by ZApiLiteClient and
+     * FunapiClient.
+     */
+    public function markMessageAsReadWithTyping(string $uid, string $token, string $chat, string $messageId): array
+    {
+        return [
+            'error' => ReadReceiptsContract::UNSUPPORTED,
+            'message' => $this->providerDisplayName() . ' has no standalone typing indicator; use the `typing` option of a send instead.',
+        ];
     }
 
     /**

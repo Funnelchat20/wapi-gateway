@@ -7,6 +7,7 @@ use Funnelchat\WapiGateway\Contracts\InstancesContract;
 use Funnelchat\WapiGateway\Contracts\GroupsContract;
 use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\QueueContract;
+use Funnelchat\WapiGateway\Contracts\ReadReceiptsContract;
 use Funnelchat\WapiGateway\Resources\Zapi\MessageResource;
 use Funnelchat\WapiGateway\Resources\Zapi\QrCodeResource;
 use Funnelchat\WapiGateway\Resources\Zapi\MeResource;
@@ -452,12 +453,19 @@ class FunapiClient extends ZApiClient
         return $res->json('participants') ?? [];
     }
 
+    /**
+     * `$options['voiceNote']` is refused here with `unsupported`, as wapi does
+     * (Funnelchat20/wapi#393). The bridge's send-audio has not been verified
+     * to honour Z-API's `waveform`, and a flag that is silently ignored would
+     * deliver a plain audio while reporting success.
+     */
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
         $startTime = microtime(true);
         $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
         $action = $this->mapAction($ext);
         if ($action === 'invalid') return ['error' => 'Invalid file extension'];
+        if ($this->wantsVoiceNote($options)) return $this->voiceNoteUnsupported($this->providerDisplayName());
         // Funapi uses endpoints WITHOUT file type suffix: /send-image, /send-document (not /send-document/pdf)
         $attr = $this->mapAttr($ext);
         $params = ['phone' => $to, $attr => $fileUrl];
@@ -966,6 +974,23 @@ class FunapiClient extends ZApiClient
         $this->logRequest('forwardMessage', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error'), 'phone' => $to] : ['phone' => $to], $startTime, $res, $url, $payload);
         if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
         return $res->json();
+    }
+
+    /**
+     * Not inherited from ZApiClient on purpose. The bridge's own API
+     * description (the "FunnelChat API (Whatsmeow Bridge)" Postman collection
+     * in this repo) lists no read-message endpoint, and it publishes no other
+     * docs. Calling the z-api path blindly would turn "not implemented" into
+     * an opaque 404 at best. So this answers UNSUPPORTED without a request,
+     * until the bridge documents one. markMessageAsReadWithTyping() is
+     * inherited and unsupported as well.
+     */
+    public function markMessageAsRead(string $uid, string $token, string $chat, string $messageId): array
+    {
+        return [
+            'error' => ReadReceiptsContract::UNSUPPORTED,
+            'message' => 'FunApi does not support marking a message as read.',
+        ];
     }
 
     /**
