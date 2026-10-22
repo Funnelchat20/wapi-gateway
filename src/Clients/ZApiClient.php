@@ -85,6 +85,11 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     /**
      * `$options['messageId']` quotes an existing message — see
      * {@see self::applyQuoteOption()}. Works in groups.
+     *
+     * `$options['editMessageId']` is a different thing with a deliberately
+     * different key: it replaces the text of that already-sent message instead
+     * of sending a new one — see {@see self::editMessage()}. Reusing
+     * `messageId` for it would quote the message rather than edit it.
      */
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
     {
@@ -95,6 +100,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
+        if (isset($options['editMessageId'])) $payload['editMessageId'] = (string) $options['editMessageId'];
         $payload = $this->applyQuoteOption($payload, $options);
         $payload = $this->applyTypingOption($payload, $options);
 
@@ -129,6 +135,25 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
         $this->logRequest('sendText', $uid, ['phone' => $to, 'has_retry' => $options['retry'] ?? false], $startTime, $res, $url, $payload);
         return MessageResource::make($res->json());
+    }
+
+    /**
+     * Replaces the text of a message already sent to `$phone`.
+     *
+     * Z-API has no separate edit endpoint: an edit is `send-text` carrying the
+     * optional `editMessageId`, so this goes through {@see self::sendText()}
+     * and inherits its error shape and logging (an edit is the entry whose
+     * payload has `editMessageId`). WhatsApp only accepts the edit for 15
+     * minutes after the original send and only for text; past that the
+     * provider rejects it and the `['error' => …]` comes back from there —
+     * this client does not keep a clock of its own.
+     *
+     * Retry stays off on purpose. `sendText`'s retry only fires on connection
+     * errors, and a retried edit that did land would be re-applied blind.
+     */
+    public function editMessage(string $uid, string $token, string $phone, string $messageId, string $text): array
+    {
+        return $this->sendText($uid, $token, $phone, $text, ['editMessageId' => $messageId]);
     }
 
     public function create(int $userId, int $deviceId, ?string $countryCode = null): array
@@ -786,7 +811,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return array_merge($res->json(), ['queueId' => $res->json('zaapId')]);
     }
 
-    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
+    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components, array $options = []): array
     {
         $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, 'send-message'], $this->baseUrl());
