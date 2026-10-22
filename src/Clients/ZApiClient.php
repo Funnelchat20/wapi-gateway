@@ -827,10 +827,8 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
      * number. A status has no recipient, so no `phone` is sent: whoever has
      * this number saved in their phone sees it.
      *
-     * Z-API and FunApi. FunapiClient inherits the image and video methods as
-     * they are and overrides only this one, because fun-api reads the text
-     * from `text`, not `message`. ZApiLiteClient overrides the three to refuse
-     * without calling out.
+     * Z-API only. FunapiClient and ZApiLiteClient inherit from this class, so
+     * both override the three status methods to refuse without calling out.
      */
     public function sendTextStatus(string $uid, string $token, string $text, array $options = []): array
     {
@@ -862,8 +860,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     /**
      * Same request and error handling as sendText(), minus `retry`: a status
      * is a one-shot publication, and replaying a request that may already
-     * have landed would publish it twice. Protected so FunapiClient can send
-     * its own text payload through it.
+     * have landed would publish it twice.
      */
     protected function publishStatus(string $method, string $uid, string $token, string $action, array $payload, array $options): array
     {

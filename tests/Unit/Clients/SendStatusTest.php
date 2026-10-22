@@ -19,13 +19,10 @@ use PHPUnit\Framework\Attributes\DataProvider;
  * so the payload carries no `phone` at all — the exact payload is pinned, not
  * just the presence of the right key.
  *
- * Z-API and FunApi publish them. FunapiClient inherits the image and video
- * methods and overrides only the text one, because the bridge reads `text`
- * where Z-API reads `message`; its exact payloads are pinned too.
- * ZApiLiteClient also extends ZApiClient, so without its own overrides it
- * would inherit the methods and post the status to its own host. Its refusal
- * is pinned with `assertNothingSent()`, which is exactly what inheritance
- * breaks.
+ * Only Z-API publishes them. FunapiClient and ZApiLiteClient extend ZApiClient,
+ * so without their own overrides they would inherit the methods and post the
+ * status to their own host. Their refusal is pinned with `assertNothingSent()`,
+ * which is exactly what inheritance breaks.
  */
 class SendStatusTest extends TestCase
 {
@@ -94,31 +91,7 @@ class SendStatusTest extends TestCase
     }
 
     /**
-     * @return array<string, array{0: callable, 1: string, 2: array}>
-     */
-    public static function funapiStatuses(): array
-    {
-        return [
-            'text' => [
-                fn(FunapiClient $client) => $client->sendTextStatus('UID', 'TOKEN', 'Hoy abrimos hasta las 20 h'),
-                'send-text-status',
-                ['text' => 'Hoy abrimos hasta las 20 h'],
-            ],
-            'image' => [
-                fn(FunapiClient $client) => $client->sendImageStatus('UID', 'TOKEN', self::IMAGE, 'Nueva colección'),
-                'send-image-status',
-                ['image' => self::IMAGE, 'caption' => 'Nueva colección'],
-            ],
-            'video' => [
-                fn(FunapiClient $client) => $client->sendVideoStatus('UID', 'TOKEN', self::VIDEO, 'Mirá el lanzamiento'),
-                'send-video-status',
-                ['video' => self::VIDEO, 'caption' => 'Mirá el lanzamiento'],
-            ],
-        ];
-    }
-
-    /**
-     * Every status method that does call out: Z-API's three and FunApi's.
+     * Every status method that does call out: Z-API's three.
      *
      * @return array<string, array{0: callable}>
      */
@@ -127,9 +100,6 @@ class SendStatusTest extends TestCase
         $cases = [];
         foreach (self::statuses() as $kind => [, $publish]) {
             $cases["Z-API $kind"] = [fn() => $publish(new ZApiClient())];
-        }
-        foreach (self::funapiStatuses() as $kind => [$publish]) {
-            $cases["FunApi $kind"] = [fn() => $publish(new FunapiClient())];
         }
 
         return $cases;
@@ -154,6 +124,9 @@ class SendStatusTest extends TestCase
     public static function refusals(): array
     {
         return [
+            'Funapi text' => [fn() => (new FunapiClient())->sendTextStatus('UID', 'TOKEN', 'Hola'), 'sendTextStatus is not supported by Funapi provider'],
+            'Funapi image' => [fn() => (new FunapiClient())->sendImageStatus('UID', 'TOKEN', self::IMAGE, 'Hola'), 'sendImageStatus is not supported by Funapi provider'],
+            'Funapi video' => [fn() => (new FunapiClient())->sendVideoStatus('UID', 'TOKEN', self::VIDEO, 'Hola'), 'sendVideoStatus is not supported by Funapi provider'],
             'ZApiLite text' => [fn() => (new ZApiLiteClient())->sendTextStatus('UID', 'TOKEN', 'Hola'), 'sendTextStatus is not supported by ZApiLite provider'],
             'ZApiLite image' => [fn() => (new ZApiLiteClient())->sendImageStatus('UID', 'TOKEN', self::IMAGE, 'Hola'), 'sendImageStatus is not supported by ZApiLite provider'],
             'ZApiLite video' => [fn() => (new ZApiLiteClient())->sendVideoStatus('UID', 'TOKEN', self::VIDEO, 'Hola'), 'sendVideoStatus is not supported by ZApiLite provider'],
@@ -172,26 +145,6 @@ class SendStatusTest extends TestCase
             && $request->url() === "https://zapi.example.com/instances/UID/token/TOKEN/$action"
             && $request->hasHeader('Client-Token', 'zapi-client-token')
             && $request->data() === $payload);
-    }
-
-    /**
-     * The bridge serves Z-API's paths on its own host, with its own
-     * Client-Token. Text goes out as `text`, the field it reads.
-     */
-    #[DataProvider('funapiStatuses')]
-    public function test_funapi_posts_the_payload_the_bridge_reads(callable $publish, string $action, array $payload): void
-    {
-        $this->fakeOk();
-
-        $result = $publish(new FunapiClient());
-
-        Http::assertSentCount(1);
-        Http::assertSent(fn($request) => $request->method() === 'POST'
-            && $request->url() === "https://funapi.example.com/instances/UID/token/TOKEN/$action"
-            && $request->hasHeader('Client-Token', 'funapi-client-token')
-            && $request->data() === $payload);
-        $this->assertTrue($result['sent']);
-        $this->assertSame('MSG-1', $result['id']);
     }
 
     #[DataProvider('statuses')]
@@ -309,7 +262,7 @@ class SendStatusTest extends TestCase
 
     /** The host would answer 200: an inherited method would come back as published. */
     #[DataProvider('refusals')]
-    public function test_zapi_lite_refuses_without_calling_out(callable $publish, string $error): void
+    public function test_funapi_and_zapi_lite_refuse_without_calling_out(callable $publish, string $error): void
     {
         $this->fakeOk();
 

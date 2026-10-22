@@ -7,10 +7,9 @@ class ZApiLiteClient extends ZApiClient
     protected string $configPrefix = 'zapi-lite';
 
     /**
-     * Statuses are published only through Z-API and FunApi for now. Without
-     * these overrides the three status methods inherited from ZApiClient
-     * would post them to Z-API Lite, so they refuse explicitly, without
-     * calling out.
+     * Statuses are published only through Z-API for now. Without these
+     * overrides the three status methods inherited from ZApiClient would post
+     * them to Z-API Lite, so they refuse explicitly, without calling out.
      */
     public function sendTextStatus(string $uid, string $token, string $text, array $options = []): array
     {

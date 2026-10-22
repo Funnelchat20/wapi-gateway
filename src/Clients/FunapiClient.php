@@ -836,17 +836,23 @@ class FunapiClient extends ZApiClient
     }
 
     /**
-     * The bridge publishes statuses under Z-API's paths, but reads a text
-     * status from `text` (`SendTextStatusRequest` in fun-api's
-     * api/internal/http/handlers/messages.go, v3.112.5), not from Z-API's
-     * `message`: with `message` it answers 400 "Text content is required".
-     *
-     * sendImageStatus() and sendVideoStatus() are inherited as they are: the
-     * bridge takes the same `{image, caption}` and `{video, caption}`.
+     * Statuses are published only through Z-API for now. Without these
+     * overrides the three status methods inherited from ZApiClient would post
+     * them to the bridge, so they refuse explicitly, without calling out.
      */
     public function sendTextStatus(string $uid, string $token, string $text, array $options = []): array
     {
-        return $this->publishStatus('sendTextStatus', $uid, $token, 'send-text-status', ['text' => $text], $options);
+        return ['error' => 'sendTextStatus is not supported by Funapi provider'];
+    }
+
+    public function sendImageStatus(string $uid, string $token, string $image, ?string $caption = null, array $options = []): array
+    {
+        return ['error' => 'sendImageStatus is not supported by Funapi provider'];
+    }
+
+    public function sendVideoStatus(string $uid, string $token, string $video, ?string $caption = null, array $options = []): array
+    {
+        return ['error' => 'sendVideoStatus is not supported by Funapi provider'];
     }
 
     public function createNewsletter(string $uid, string $token, string $name, string $description): array
