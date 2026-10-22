@@ -83,9 +83,45 @@ class FunapiClient extends ZApiClient
     }
 
     /**
+     * whatsgo cannot edit a sent message, so this refuses instead of sending.
+     *
+     * Inheriting {@see ZApiClient::editMessage()} is worse than having no edit
+     * at all: that implementation is `sendText()` carrying `editMessageId`,
+     * and this client's `sendText()` has no such key — the edit left as a
+     * plain send, posting a SECOND message to the chat and returning the
+     * normal success resource, so the caller recorded the original as edited.
+     *
+     * whatsgo's OpenAPI (v3.112.5) documents no `editMessageId` anywhere; its
+     * only "edit" endpoint is `send-edit-event`, which edits an event, not a
+     * message. `isEdit` exists solely on the inbound webhook — whatsgo reports
+     * that a message it received was edited, it does not edit.
+     *
+     * The method stays declared so the refusal is explicit, which also means
+     * `method_exists()` keeps answering true by inheritance: a caller that
+     * probes for the method to build its provider list (communities'
+     * `WapiSentMessageEditor`) will still list funapi, and gets this error
+     * rather than a duplicate. Revisit if Funnelchat20/fun-api#211 is answered
+     * with a real edit endpoint.
+     */
+    public function editMessage(string $uid, string $token, string $phone, string $messageId, string $text): array
+    {
+        return ['error' => 'Editing a sent message is not supported by funapi.'];
+    }
+
+    /**
      * `$options['messageId']` quotes an existing message — same contract and
      * wire field as {@see ZApiClient::sendText()} (funapi mirrors the z-api
      * send-text payload). A blank value is treated as "no quote".
+     *
+     * Mention-all is where funapi does NOT mirror z-api: the caller option
+     * stays `mentionAll` (z-api's field name, what every caller already
+     * sends), but the wire field here is `mentionedAll` — the name whatsgo
+     * documents in `SendTextRequest` and in every other send-* schema
+     * (https://api.whatsgo.wa-api.io/docs/openapi.json, v3.112.5). Sending
+     * z-api's `mentionAll` is not an error: whatsgo drops the unknown field,
+     * answers 200, and delivers the body as plain text — so an `@all` written
+     * in the message reads as literal text instead of mentioning anyone
+     * (communities issue #1730).
      */
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
     {
@@ -93,7 +129,7 @@ class FunapiClient extends ZApiClient
         $url = $this->buildUrl($uid, $token, 'send-text');
         $payload = ['phone' => $to, 'message' => $text];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
-        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
+        if (isset($options['mentionAll'])) $payload['mentionedAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
         if (isset($options['messageId']) && trim((string) $options['messageId']) !== '') $payload['messageId'] = (string) $options['messageId'];
@@ -436,7 +472,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['fileName'])) $params['fileName'] = $options['fileName'];
         if (isset($options['caption'])) $params['caption'] = $options['caption'];
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
-        if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
+        if (isset($options['mentionAll'])) $params['mentionedAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
         if (! in_array($action, self::QUOTE_UNSUPPORTED_ACTIONS, true)) {
@@ -504,7 +540,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['name'])) $params['name'] = $options['name'];
         if (isset($options['address'])) $params['address'] = $options['address'];
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
-        if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
+        if (isset($options['mentionAll'])) $params['mentionedAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
         $params = $this->applyQuoteOption($params, $options);
@@ -536,7 +572,7 @@ class FunapiClient extends ZApiClient
             ),
         ];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
-        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
+        if (isset($options['mentionAll'])) $payload['mentionedAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
         $payload = $this->applyTypingOption($payload, $options);
@@ -582,7 +618,7 @@ class FunapiClient extends ZApiClient
             ],
         ];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
-        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
+        if (isset($options['mentionAll'])) $payload['mentionedAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
         $payload = $this->applyTypingOption($payload, $options);
@@ -618,7 +654,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['caption'])) $payload['caption'] = $options['caption'];
         if (isset($options['viewOnce'])) $payload['viewOnce'] = (bool) $options['viewOnce'];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
-        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
+        if (isset($options['mentionAll'])) $payload['mentionedAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
         $payload = $this->applyQuoteOption($payload, $options);
@@ -714,7 +750,7 @@ class FunapiClient extends ZApiClient
         ];
         if (isset($options['pollMaxOptions'])) $payload['pollMaxOptions'] = (int) $options['pollMaxOptions'];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
-        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
+        if (isset($options['mentionAll'])) $payload['mentionedAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
 
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
@@ -744,7 +780,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['linkDescription'])) $payload['linkDescription'] = $options['linkDescription'];
         if (isset($options['image'])) $payload['image'] = $options['image'];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
-        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
+        if (isset($options['mentionAll'])) $payload['mentionedAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
         $payload = $this->applyQuoteOption($payload, $options);
@@ -787,7 +823,7 @@ class FunapiClient extends ZApiClient
         return MessageResource::make($res->json());
     }
 
-    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
+    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components, array $options = []): array
     {
         // Templates are a WhatsApp Cloud API feature, not available on whatsmeow-based providers
         return ['error' => 'sendTemplate() is not supported by Funapi provider. Use WhatsApp Cloud API for templates.'];
