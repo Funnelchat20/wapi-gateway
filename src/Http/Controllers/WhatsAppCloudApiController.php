@@ -238,8 +238,8 @@ class WhatsAppCloudApiController
                     ],
                     'phones' => [
                         [
-                            'phone' => $validated['contactPhone'],
-                            'wa_id' => $validated['contactPhone']
+                            'phone' => WhatsAppCloudHelper::contactPhoneField($validated['contactPhone']),
+                            'wa_id' => WhatsAppCloudHelper::contactWaId($validated['contactPhone'])
                         ]
                     ]
                 ]

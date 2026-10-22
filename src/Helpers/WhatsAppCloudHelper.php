@@ -56,6 +56,34 @@ class WhatsAppCloudHelper
         return (bool) preg_match('/^[A-Za-z]{2}\.(?:[A-Za-z0-9]+\.)*[A-Za-z0-9]{1,128}$/', trim($identifier));
     }
 
+    /**
+     * The `contacts[].phones[].phone` field Meta forwards into the shared
+     * vCard's TEL value. `conversations` stores the phone as bare digits with
+     * the country code already baked in (e.g. "573108261101"), no leading `+`.
+     * Without it, the recipient's OS contact importer (iOS in particular)
+     * can't tell the number is already complete, guesses a region from
+     * context and prepends that country code again — the duplicate-indicativo
+     * bug from issue Funnelchat20/conversations#1771. A leading `+` is the
+     * whole fix: it marks the number as already-international so nothing
+     * downstream needs to guess.
+     */
+    public static function contactPhoneField(string $rawPhone): string
+    {
+        return '+'.preg_replace('/[^0-9]/', '', $rawPhone);
+    }
+
+    /**
+     * The `contacts[].phones[].wa_id` field, used by the recipient's WhatsApp
+     * client to resolve the "Message" quick-action — per Meta's contract this
+     * is bare digits, never a `+` or other formatting. Kept separate from
+     * contactPhoneField() on purpose: the two fields have different formats
+     * and must not collapse into a single value again.
+     */
+    public static function contactWaId(string $rawPhone): string
+    {
+        return preg_replace('/[^0-9]/', '', $rawPhone);
+    }
+
     public static function getHeaderTemplate(string $typeTemplate, ?string $header, ?string $file, string $token, string $apiUrl): array
     {
         $type = MessageTemplateTypeEnum::from(strtolower($typeTemplate));
