@@ -20,11 +20,13 @@ use Funnelchat\WapiGateway\Resources\Uazapi\GroupsResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\GroupResource;
 use Funnelchat\WapiGateway\Resources\Uazapi\CreateGroupResource;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
+use Funnelchat\WapiGateway\Traits\ResolvesMediaType;
 use Illuminate\Support\Facades\Http;
 
 class UazapiClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract
 {
     use LogsDeviceRequests;
+    use ResolvesMediaType;
 
     protected function getProviderName(): string
     {
@@ -336,12 +338,18 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return [];
     }
 
+    /**
+     * `$options['type']` (image, video, audio, document or sticker) is sent
+     * as /send/media's `type` without looking at the URL; otherwise the type
+     * comes from the extension of the URL path, or of `fileName` when the
+     * path has none (see ResolvesMediaType). The URL goes out unchanged.
+     */
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
         $startTime = microtime(true);
-        $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
-        $type = $this->mapType($ext);
-        if ($type === 'invalid') return ['error' => 'Invalid file extension'];
+        $media = $this->resolveMediaType($fileUrl, $options, fn (string $ext) => $this->mapType($ext));
+        if (isset($media['error'])) return ['error' => $media['error']];
+        ['type' => $type, 'ext' => $ext] = $media;
         $payload = ['number' => $to, 'type' => $type, 'file' => $fileUrl];
         if (isset($options['caption'])) $payload['text'] = $options['caption'];
         if (isset($options['fileName']) && $type === 'document') $payload['docName'] = $options['fileName'];
@@ -506,6 +514,7 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
             'jpg' => 'image', 'jpeg' => 'image', 'png' => 'image', 'gif' => 'image',
             'webp' => 'sticker', 'svg' => 'sticker',
             'pdf' => 'document', 'doc' => 'document', 'docx' => 'document',
+            'xls' => 'document', 'xlsx' => 'document', 'ppt' => 'document', 'pptx' => 'document', 'csv' => 'document', 'txt' => 'document',
             'mp3' => 'audio', 'ogg' => 'audio', 'aac' => 'audio', 'm4a' => 'audio', 'opus' => 'audio', 'oga' => 'audio', 'wav' => 'audio',
             'mp4' => 'video', 'mov' => 'video', 'avi' => 'video', 'wmv' => 'video'
         ][$ext] ?? 'invalid';

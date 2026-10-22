@@ -26,6 +26,7 @@ use Funnelchat\WapiGateway\Resources\Zapi\CreateGroupResource;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Funnelchat\WapiGateway\Traits\ConfiguresClientProxy;
 use Funnelchat\WapiGateway\Traits\HandlesVoiceNoteOption;
+use Funnelchat\WapiGateway\Traits\ResolvesMediaType;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Http\Client\ConnectionException;
@@ -37,6 +38,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     use LogsDeviceRequests;
     use ConfiguresClientProxy;
     use HandlesVoiceNoteOption;
+    use ResolvesMediaType;
 
     protected string $configPrefix = 'zapi';
 
@@ -72,9 +74,9 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     protected const QR_CODE_RETRIEVAL_ERROR_MESSAGE = 'Error retrieving QR code.';
 
     /**
-     * `sendFile` routes to a different Z-API endpoint per file extension, and
+     * `sendFile` routes to a different Z-API endpoint per media type, and
      * they do not all accept the `messageId` quote param — send-audio is the
-     * lone exception among the types `mapAction()` produces. The param is
+     * lone exception among the endpoints it targets. The param is
      * withheld there rather than sent and hoped to be ignored, so an unrelated
      * audio send can never fail because of a quote it could not honor anyway.
      */
@@ -558,21 +560,33 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
      * 2026-10-16). A file that is not audio is refused with
      * `invalid_voice_note_file` before anything is sent. Inherited by
      * ZApiLiteClient.
+     *
+     * `$options['type']` (image, video, audio, document or sticker) picks the
+     * endpoint without looking at the URL; otherwise the type comes from the
+     * extension of the URL path, or of `fileName` when the path has none (see
+     * {@see ResolvesMediaType}). The URL goes out unchanged. A document also
+     * needs that extension for `send-document/{ext}`: without one it is
+     * refused before any request.
      */
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
         $startTime = microtime(true);
-        $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
-        $action = $this->mapAction($ext);
-        if ($action === 'invalid') return ['error' => 'Invalid file extension'];
+        $media = $this->resolveMediaType($fileUrl, $options, fn (string $ext) => $this->mapAttr($ext));
+        if (isset($media['error'])) return ['error' => $media['error']];
+        ['type' => $type, 'ext' => $ext] = $media;
+        if ($type === 'document' && $ext === '') {
+            return ['error' => $this->providerDisplayName() . ' needs the file extension to send a document: the URL path has none, and neither has fileName'];
+        }
+        // Z-API names each media endpoint after its type: send-image,
+        // send-video, send-audio, send-document/{ext}, send-sticker.
+        $action = 'send-' . $type;
         $voiceNote = $this->wantsVoiceNote($options);
         if ($voiceNote && $action !== 'send-audio') {
             return $this->invalidVoiceNoteFile('A voice note must be an audio file (aac, oga, ogg, mp3, m4a, opus or wav).');
         }
         $quotable = ! in_array($action, self::QUOTE_UNSUPPORTED_ACTIONS, true);
         if ($action === 'send-document') $action = $action . '/' . $ext;
-        $attr = $this->mapAttr($ext);
-        $params = ['phone' => $to, $attr => $fileUrl];
+        $params = ['phone' => $to, $type => $fileUrl];
         if (isset($options['fileName'])) $params['fileName'] = $options['fileName'];
         if (isset($options['caption'])) $params['caption'] = $options['caption'];
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
@@ -585,7 +599,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
 
         // Automatically enable async processing for video files (improves performance and prevents timeouts)
         // Can be explicitly disabled by setting $options['async'] = false
-        $isVideo = in_array($ext, ['mp4', 'mov', 'gif']);
+        $isVideo = $type === 'video';
         if ($isVideo && !isset($options['async'])) {
             $params['async'] = true;
         } elseif (isset($options['async'])) {
@@ -808,17 +822,10 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         return $res->json();
     }
 
-    protected function mapAction(string $ext): string
-    {
-        return [
-            'jpg' => 'send-image', 'jpeg' => 'send-image', 'png' => 'send-image',
-            'gif' => 'send-video', 'mp4' => 'send-video', 'mov' => 'send-video',
-            'aac' => 'send-audio', 'oga' => 'send-audio', 'ogg' => 'send-audio', 'mp3' => 'send-audio', 'm4a' => 'send-audio', 'opus' => 'send-audio', 'wav' => 'send-audio',
-            'pdf' => 'send-document', 'doc' => 'send-document', 'docx' => 'send-document',
-            'svg' => 'send-sticker', 'webp' => 'send-sticker'
-        ][$ext] ?? 'invalid';
-    }
-
+    /**
+     * The media type of an extension, which is also the payload attribute
+     * that carries the URL and the suffix of the endpoint (`send-{type}`).
+     */
     protected function mapAttr(string $ext): string
     {
         return [
@@ -826,6 +833,7 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
             'gif' => 'video', 'mp4' => 'video', 'mov' => 'video',
             'aac' => 'audio', 'oga' => 'audio', 'ogg' => 'audio', 'mp3' => 'audio', 'm4a' => 'audio', 'opus' => 'audio', 'wav' => 'audio',
             'pdf' => 'document', 'doc' => 'document', 'docx' => 'document',
+            'xls' => 'document', 'xlsx' => 'document', 'ppt' => 'document', 'pptx' => 'document', 'csv' => 'document', 'txt' => 'document',
             'svg' => 'sticker', 'webp' => 'sticker'
         ][$ext] ?? 'invalid';
     }

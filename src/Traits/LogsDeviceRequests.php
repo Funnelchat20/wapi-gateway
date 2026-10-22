@@ -16,6 +16,52 @@ trait LogsDeviceRequests
         return preg_replace('#/token/[^/]+/#', '/token/***/', $url);
     }
 
+    /**
+     * A URL as logs may keep it: scheme, host, port and path. The query
+     * string, the fragment and any user info are dropped.
+     *
+     * A signed media URL (S3's X-Amz-Signature, GCS's X-Goog-Signature, a
+     * `sig` or `token` param) is a bearer credential for as long as it lives.
+     * The provider still receives it whole; only what is logged loses it.
+     * Anything that is not, as a whole, an http(s) URL comes back unchanged,
+     * and so does a URL with nothing to drop.
+     */
+    protected function stripUrlSecrets(string $value): string
+    {
+        if (preg_match('#^(https?://)([^/?\#\s]+)([^?\#\s]*)(?:[?\#]\S*)?$#i', $value, $m) !== 1) {
+            return $value;
+        }
+
+        $authority = $m[2];
+        $at = strrpos($authority, '@');
+        if ($at !== false) {
+            $authority = substr($authority, $at + 1);
+        }
+
+        return $m[1] . $authority . $m[3];
+    }
+
+    /**
+     * stripUrlSecrets() on every string value, at any depth. Generic on
+     * purpose: media URLs travel under a different key per provider (Meta's
+     * `image.link`, Z-API's `image`, UAZAPI's `file`, a button header…), and
+     * a key list would miss the next one.
+     */
+    protected function stripUrlSecretsDeep(?array $data): ?array
+    {
+        if ($data === null) {
+            return null;
+        }
+
+        array_walk_recursive($data, function (&$value): void {
+            if (is_string($value)) {
+                $value = $this->stripUrlSecrets($value);
+            }
+        });
+
+        return $data;
+    }
+
     protected function redactSensitiveKeys(?array $data): ?array
     {
         if ($data === null) {
@@ -42,6 +88,12 @@ trait LogsDeviceRequests
     {
         $provider = $this->getProviderName();
         $url = $this->sanitizeUrl($url);
+        // A provider endpoint that carries our token (masked above) keeps its
+        // query: it holds our own params (messageId, phone). Any other URL
+        // loses query and fragment, like the URLs inside the payload.
+        if (! str_contains($url, '/token/***/')) {
+            $url = $this->stripUrlSecrets($url);
+        }
         $durationMs = $startTime !== null ? (int)((microtime(true) - $startTime) * 1000) : null;
         $sentAt = $startTime !== null ? date('Y-m-d H:i:s', (int) $startTime) : now()->toDateTimeString();
 
@@ -65,7 +117,7 @@ trait LogsDeviceRequests
                 : (json_encode($context['error']) ?: (string) $context['error']);
         }
 
-        $logData = array_merge($logData, $context);
+        $logData = $this->stripUrlSecretsDeep(array_merge($logData, $context));
 
         if (isset($context['error'])) {
             logger()->error("wapi-gateway.{$provider}.{$method}.error", $logData);
@@ -77,8 +129,8 @@ trait LogsDeviceRequests
             try {
                 $responseBody = $response && method_exists($response, 'json') ? $response->json() : null;
 
-                $responseBody = $this->truncatePayloadForSqs($this->redactSensitiveKeys($responseBody));
-                $requestPayload = $this->truncatePayloadForSqs($this->redactSensitiveKeys($requestPayload));
+                $responseBody = $this->truncatePayloadForSqs($this->redactSensitiveKeys($this->stripUrlSecretsDeep($responseBody)));
+                $requestPayload = $this->truncatePayloadForSqs($this->redactSensitiveKeys($this->stripUrlSecretsDeep($requestPayload)));
 
                 StoreDeviceLogJob::dispatch(
                     $uid,
