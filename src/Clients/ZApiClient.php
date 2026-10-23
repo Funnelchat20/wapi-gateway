@@ -823,6 +823,65 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
     }
 
     /**
+     * Publish a WhatsApp status (the 24h "estado") from the instance's own
+     * number. A status has no recipient, so no `phone` is sent: whoever has
+     * this number saved in their phone sees it.
+     *
+     * Z-API only. FunapiClient and ZApiLiteClient inherit from this class, so
+     * both override the three status methods to refuse without calling out.
+     */
+    public function sendTextStatus(string $uid, string $token, string $text, array $options = []): array
+    {
+        return $this->publishStatus('sendTextStatus', $uid, $token, 'send-text-status', ['message' => $text], $options);
+    }
+
+    /**
+     * `$caption` is optional on Z-API: a null or blank one is omitted, never
+     * sent empty.
+     */
+    public function sendImageStatus(string $uid, string $token, string $image, ?string $caption = null, array $options = []): array
+    {
+        $payload = ['image' => $image];
+        if ($caption !== null && trim($caption) !== '') $payload['caption'] = $caption;
+        return $this->publishStatus('sendImageStatus', $uid, $token, 'send-image-status', $payload, $options);
+    }
+
+    /**
+     * Same caption rule as {@see self::sendImageStatus()}. Z-API caps a status
+     * video at 10 MB.
+     */
+    public function sendVideoStatus(string $uid, string $token, string $video, ?string $caption = null, array $options = []): array
+    {
+        $payload = ['video' => $video];
+        if ($caption !== null && trim($caption) !== '') $payload['caption'] = $caption;
+        return $this->publishStatus('sendVideoStatus', $uid, $token, 'send-video-status', $payload, $options);
+    }
+
+    /**
+     * Same request and error handling as sendText(), minus `retry`: a status
+     * is a one-shot publication, and replaying a request that may already
+     * have landed would publish it twice.
+     */
+    protected function publishStatus(string $method, string $uid, string $token, string $action, array $payload, array $options): array
+    {
+        $startTime = microtime(true);
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, $action], $this->baseUrl());
+
+        $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
+            ->timeout((int)($options["timeout"] ?? config("$this->configPrefix.timeout", 120)))
+            ->post($url, $payload);
+
+        if ($res->failed() || $res->json('error')) {
+            $error = $this->formatError($res->json('error', 'error'));
+            $this->logRequest($method, $uid, ['error' => $error], $startTime, $res, $url, $payload);
+            return ['error' => $error];
+        }
+
+        $this->logRequest($method, $uid, [], $startTime, $res, $url, $payload);
+        return MessageResource::make($res->json());
+    }
+
+    /**
      * The media type of an extension, which is also the payload attribute
      * that carries the URL and the suffix of the endpoint (`send-{type}`).
      */
