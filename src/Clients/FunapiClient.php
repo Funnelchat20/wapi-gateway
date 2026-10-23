@@ -418,7 +418,9 @@ class FunapiClient extends ZApiClient
     {
         $disconnectUrl = $this->buildUrl($uid, $token, 'disconnect');
         $disc = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($disconnectUrl);
-        if ($disc->failed() || $disc->json('error')) return ['error' => $disc->json('error') ?? 'disconnect_failed'];
+        // Best-effort disconnect: a failed disconnect (e.g. an instance already disconnected on the
+        // provider) must NOT skip the cancel below. Cancelling the on-demand subscription is the
+        // point of unsubscribe (stop paying for the instance); the disconnect is only a courtesy logout.
         $url = str_replace(['UID', 'TOKEN'], [$uid, $token], config('funapi.unsubscription_url'));
         $res = Http::withToken(config('funapi.token'))->post($url);
         if ($res->failed() || $res->json('error')) return ['error' => $res->json('error') ?? 'unsubscribe_failed'];

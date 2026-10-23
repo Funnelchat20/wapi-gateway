@@ -71,7 +71,7 @@ class ZApiClientUnsubscribeTest extends TestCase
         });
     }
 
-    public function test_failed_disconnect_is_recorded_and_short_circuits_before_cancel(): void
+    public function test_failed_disconnect_is_logged_but_does_not_short_circuit_the_cancel(): void
     {
         Queue::fake();
         Http::fake([
@@ -81,14 +81,24 @@ class ZApiClientUnsubscribeTest extends TestCase
 
         $result = $this->client->unsubscribe('INST123', self::TOKEN);
 
-        $this->assertSame('instance_offline', $result['error']);
-        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/integrator/on-demand/cancel'));
+        // A failed disconnect (most commonly an instance already offline on the provider) must NOT
+        // keep the paid subscription alive: the cancel still runs and the unsubscribe succeeds.
+        // Cancelling is the point of unsubscribe; the disconnect is only a courtesy logout.
+        $this->assertArrayNotHasKey('error', $result);
+        $this->assertArrayHasKey('paidTill', $result);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/integrator/on-demand/cancel'));
 
-        Queue::assertPushed(StoreDeviceLogJob::class, 1);
+        // Both steps are still logged: the disconnect as an error, the cancel as a success.
+        Queue::assertPushed(StoreDeviceLogJob::class, 2);
         Queue::assertPushed(StoreDeviceLogJob::class, function (StoreDeviceLogJob $job) {
             return $this->prop($job, 'method') === 'unsubscribe'
                 && ($this->prop($job, 'requestPayload')['step'] ?? null) === 'disconnect'
                 && $this->prop($job, 'isError') === true;
+        });
+        Queue::assertPushed(StoreDeviceLogJob::class, function (StoreDeviceLogJob $job) {
+            return $this->prop($job, 'method') === 'unsubscribe'
+                && ($this->prop($job, 'requestPayload')['step'] ?? null) === 'cancel'
+                && $this->prop($job, 'isError') === false;
         });
     }
 
