@@ -509,7 +509,10 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         $disconnectUrl = str_replace(['UID', 'TOKEN', 'ACTION'], [$instanceUid, $token, 'disconnect'], $this->baseUrl());
         $disc = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])->get($disconnectUrl);
         $this->logRequest('unsubscribe', $uid, $disc->failed() || $disc->json('error') ? ['error' => $disc->json('error', 'error')] : [], $startTime, $disc, $disconnectUrl, ['step' => 'disconnect']);
-        if ($disc->failed() || $disc->json('error')) return ['error' => $disc->json('error') ?? 'disconnect_failed'];
+        // Best-effort disconnect: a failed disconnect (e.g. an instance already disconnected on the
+        // provider) must NOT skip the cancel below. Cancelling the on-demand subscription is the
+        // point of unsubscribe (stop paying for the instance); the disconnect is only a courtesy
+        // logout. The failure is logged above for observability.
 
         $startTime = microtime(true);
         $url = str_replace(['UID', 'TOKEN'], [$instanceUid, $token], config("$this->configPrefix.unsubscription_url"));
