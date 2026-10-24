@@ -1532,6 +1532,31 @@ class FunapiClient extends ZApiClient
             'phone' => $raw['Phone'] ?? $raw['phone'] ?? $raw['to'] ?? null,
             'fileUrl' => $raw['ImageUrl'] ?? $raw['imageUrl'] ?? $raw['DocumentUrl'] ?? $raw['documentUrl'] ?? $raw['VideoUrl'] ?? $raw['videoUrl'] ?? $raw['AudioUrl'] ?? $raw['audioUrl'] ?? $raw['fileUrl'] ?? '',
             'caption' => $raw['Caption'] ?? $raw['caption'] ?? '',
+            // Funapi-only (3.113.0+): the operation state and what WhatsApp
+            // answered. `uncertain` + `serverCode: 479` means WhatsApp refused
+            // that send and funapi never resends it; any other `uncertain`
+            // (timeout, 475, 420, 451) may still have been delivered.
+            'status' => isset($raw['status']) && is_string($raw['status']) ? $raw['status'] : null,
+            'errors' => array_values(array_filter((array) ($raw['errors'] ?? []), 'is_string')),
+            'lastFailure' => $this->normalizeQueueLastFailure($raw['lastFailure'] ?? null),
+        ];
+    }
+
+    /**
+     * @return array{phase: ?string, code: ?string, serverCode: ?int}|null
+     */
+    private function normalizeQueueLastFailure(mixed $raw): ?array
+    {
+        if (! is_array($raw)) {
+            return null;
+        }
+
+        $serverCode = $raw['serverCode'] ?? null;
+
+        return [
+            'phase' => isset($raw['phase']) && is_string($raw['phase']) ? $raw['phase'] : null,
+            'code' => isset($raw['code']) && is_string($raw['code']) ? $raw['code'] : null,
+            'serverCode' => is_numeric($serverCode) ? (int) $serverCode : null,
         ];
     }
 
