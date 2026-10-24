@@ -5,6 +5,8 @@ namespace Funnelchat\WapiGateway\Contracts;
 interface QueueContract
 {
     /**
+     * `status`, `errors` and `lastFailure` are only returned by funapi.
+     *
      * @param array{cursor?: ?string, pageSize?: int} $options
      * @return array{
      *   messages: list<array{
@@ -14,7 +16,10 @@ interface QueueContract
      *     created: ?string,
      *     phone: ?string,
      *     fileUrl: string,
-     *     caption: string
+     *     caption: string,
+     *     status?: ?string,
+     *     errors?: list<string>,
+     *     lastFailure?: array{phase: ?string, code: ?string, serverCode: ?int}|null
      *   }>,
      *   cursor: ?string,
      *   hasMore: bool
