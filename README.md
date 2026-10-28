@@ -144,6 +144,123 @@ if (WapiGateway::messages($provider)->handlesTypingDelayServerSide()) {
 > `delayTyping` se manda igual, pero el endpoint `send-button-actions` no lo
 > documenta: ahí el typing es best-effort.
 
+### Marcar como leído y «escribiendo…» (`ReadReceiptsContract`)
+
+Dos métodos para el visto (los tildes azules) de un mensaje recibido. Viven en
+una interfaz aparte, `ReadReceiptsContract`, y no en `MessagesContract`: así
+nadie que implemente `MessagesContract` tiene que cambiar.
+
+```php
+use Funnelchat\WapiGateway\Contracts\ReadReceiptsContract;
+
+$client = WapiGateway::messages($provider);
+
+if ($client instanceof ReadReceiptsContract) {
+    // $chat: teléfono o id de grupo (Z-API lo exige; Meta lo ignora).
+    $res = $client->markMessageAsRead($uid, $token, $chat, $messageId);
+
+    // Sólo Cloud API: el mismo visto, con «escribiendo…».
+    $res = $client->markMessageAsReadWithTyping($uid, $token, $chat, $wamid);
+}
+
+// ['success' => true]
+// ['error' => ReadReceiptsContract::UNSUPPORTED, 'message' => '...']  (no se mandó nada)
+// ['error' => ...]                                                     (el proveedor lo rechazó)
+```
+
+| Método | Meta | Z-API | Z-API Lite | FunApi |
+|--------|------|-------|------------|--------|
+| `markMessageAsRead()` | ✅ | ✅ | ✅ | ❌ `unsupported` |
+| `markMessageAsReadWithTyping()` | ✅ | ❌ `unsupported` | ❌ `unsupported` | ❌ `unsupported` |
+
+- **Meta**: `POST /{phone_number_id}/messages` con
+  `{"messaging_product":"whatsapp","status":"read","message_id":"<WAMID>"}`. Con
+  «escribiendo…» se agrega `"typing_indicator":{"type":"text"}`. Sólo cuenta como
+  éxito si Meta contesta `{"success": true}`. Meta marca también los mensajes
+  anteriores de la conversación, acepta mensajes de hasta 30 días y quita el
+  indicador cuando el negocio responde o a los 25 segundos. Fuentes:
+  [mark-message-as-read](https://developers.facebook.com/docs/whatsapp/cloud-api/guides/mark-message-as-read)
+  y [typing-indicators](https://developers.facebook.com/docs/whatsapp/cloud-api/typing-indicators).
+- **Z-API / Z-API Lite**: `POST .../read-message` con `{"phone", "messageId"}`,
+  que responde `{"value": true}`
+  ([read-message](https://developer.z-api.io/en/message/read-message)). En QR no
+  hay «escribiendo…» suelto: sólo existe como `delayTyping` de un envío (la
+  opción `typing` de arriba).
+- **FunApi**: la colección del bridge no publica un endpoint de visto, así que
+  se rechaza sin llamar.
+- Nunca lanzan excepción. Si falla la conexión, el error que devuelven tiene el
+  token de la instancia tapado.
+
+`sendTypingIndicator()` sigue igual (en QR devuelve `success` sin hacer nada).
+
+### Nota de voz (`sendFile` con `voiceNote`)
+
+```php
+$res = WapiGateway::messages($provider)->sendFile($uid, $token, $phone, $audioUrl, [
+    'voiceNote' => true,
+]);
+```
+
+| Provider | Qué se manda | Archivos |
+|----------|--------------|----------|
+| Meta | `audio.voice = true` | sólo `.ogg` / `.opus` (OGG con OPUS, regla de Meta) |
+| Z-API / Z-API Lite | `waveform: true` en `send-audio` | cualquier audio |
+| FunApi | — | `['error' => 'unsupported']` |
+
+Es la misma opción, con los mismos códigos de error, que `send-file` de wapi
+(Funnelchat20/wapi#393). Si el archivo no sirve como nota de voz, devuelve
+`['error' => 'invalid_voice_note_file', 'message' => ...]`. Todo rechazo pasa
+antes de cualquier request: en Meta tampoco se dispara el typing. Sin la opción,
+el payload queda byte a byte igual que antes. Z-API no documenta un flag de
+push-to-talk, y `waveform` («Whether the audio will be sent with sound waves or
+not») es lo más cercano.
+
+### Archivos por URL (`sendFile` con `type`)
+
+El integrador pasa una URL y el SDK la manda **tal cual** al proveedor: una URL
+firmada (S3, CloudFront, etc.) conserva su firma.
+
+```php
+$res = WapiGateway::messages($provider)->sendFile($uid, $token, $phone, $fileUrl, [
+    'type'     => 'document',      // opcional: image | video | audio | document | sticker
+    'fileName' => 'Contrato.pdf',  // opcional
+]);
+```
+
+- **Con `type`** el SDK no adivina el tipo por la URL. Vacío o `null` cuenta
+  como ausente; mayúsculas y espacios se ignoran. Cualquier otro valor devuelve
+  `['error' => 'Invalid file type: expected one of image, video, audio, document, sticker']`
+  sin hacer ningún request.
+- **Sin `type`** el tipo sale de la extensión del **path** de la URL, sin query
+  ni fragmento y en minúsculas:
+  `https://b.s3.amazonaws.com/a/foto.JPG?X-Amz-Signature=...` → imagen. Si el
+  path no tiene extensión se usa la de `fileName`. Si nada da una extensión
+  conocida: `['error' => 'Invalid file extension']`, como antes.
+- **Compatibilidad**: una URL que ya funcionaba arma el mismo request, incluso
+  la que traía la extensión sólo en la query (`.../download?file=foto.jpg`). Esa
+  lectura se conserva cuando el path no da una extensión conocida. Sólo cambia
+  una URL cuyo path y cuya query terminan en extensiones conocidas distintas
+  (`doc.pdf?v=foto.png`): ahora manda la del path.
+- **Z-API / Z-API Lite** necesitan la extensión para `send-document/{ext}`. Un
+  documento sin extensión en el path ni en `fileName` devuelve
+  `['error' => 'Z-API needs the file extension to send a document: ...']` sin
+  request. Con `type => 'document'` sirve cualquier extensión (`.odt`, etc.).
+  FunApi, UAZAPI y Meta no la necesitan.
+- El `async` automático de Z-API / FunApi se aplica a todo video, también al de
+  `type => 'video'`.
+- En Meta, la nota de voz (`voiceNote`) sigue pidiendo `.ogg` / `.opus`: la
+  extensión del path, o la de `fileName`.
+
+Extensiones que reconoce cada proveedor sin `type`:
+
+| Tipo | Meta | Z-API / Z-API Lite / FunApi | UAZAPI |
+|------|------|-----------------------------|--------|
+| image | jpg, jpeg, png | jpg, jpeg, png | jpg, jpeg, png, gif |
+| video | mp4, 3gp, mov, gif | mp4, mov, gif | mp4, mov, avi, wmv |
+| audio | aac, amr, mp3, m4a, ogg, opus, wav | aac, oga, ogg, mp3, m4a, opus, wav | aac, oga, ogg, mp3, m4a, opus, wav |
+| document | pdf, txt, doc, docx, xls, xlsx, ppt, pptx | pdf, doc, docx, xls, xlsx, ppt, pptx, csv, txt | pdf, doc, docx, xls, xlsx, ppt, pptx, csv, txt |
+| sticker | webp | webp, svg | webp, svg |
+
 ### Preview de links (`sendLink`)
 
 | Provider | Tarjeta de preview | Título / descripción / imagen custom |
@@ -299,6 +416,34 @@ Cobertura: `sendText`, `sendFile`, `sendLocation`, `sendButtons`,
 | `lightGroupMetadata()` | ✅ | ✅ | ✅ | ❌ |
 | `groupMetadata()` | ✅ | ✅ | ✅ | ❌ |
 
+### 🌐 Grupos API oficial — WhatsApp Cloud API (`CloudApiGroupsContract`)
+
+Solo Meta: la feature nativa de Grupos del Business Platform (Official Business Account,
+tope de 8 participantes, join-request en vez de add-participant directo). Contrato separado
+de `GroupsContract` — no comparte métodos con Z-API/UAZAPI/Funapi porque el modelo de
+capacidades no es compatible (sin add-admin, sin comunidades/newsletters, con join requests).
+
+| Método | Meta |
+|--------|------|
+| `createGroup()` | ✅ |
+| `deleteGroup()` | ✅ |
+| `group()` | ✅ |
+| `groups()` | ✅ |
+| `updateGroupSettings()` | ✅ |
+| `getGroupInviteLink()` | ✅ |
+| `resetGroupInviteLink()` | ✅ |
+| `sendGroupInviteTemplate()` | ✅ |
+| `removeGroupParticipant()` | ✅ |
+| `getGroupJoinRequests()` | ✅ |
+| `approveGroupJoinRequest()` | ✅ |
+| `rejectGroupJoinRequest()` | ✅ |
+
+> ⚠️ El endpoint/método existe y está implementado contra la referencia pública de Meta, pero
+> el body exacto de `removeGroupParticipant()`, `approveGroupJoinRequest()` y
+> `rejectGroupJoinRequest()` (array `participants` con `user`/`user_id`) no está confirmado
+> contra la referencia completa del Graph API — validar contra un número Cloud API Groups real
+> antes de depender de esto en producción.
+
 ### 📇 Contactos
 
 | Método | Z-API | UAZAPI | Funapi | Meta |
@@ -409,7 +554,7 @@ foreach ($results as $messageId => $result) {
 ### Procesamiento Asíncrono de Videos
 
 ```php
-// Automático para .mp4, .mov, .gif
+// Automático para videos: .mp4, .mov, .gif, o `type => 'video'`
 $response = WapiGateway::messages(ProviderEnum::ZApi)
     ->sendFile($uid, $token, $phone, 'https://example.com/video.mp4', [
         'caption' => 'Mi video',
@@ -663,6 +808,20 @@ class WhatsAppController extends Controller
 ```
 
 ## Changelog
+
+### Sin publicar (pendiente de asignar versión)
+
+**Added:**
+- ✨ `CloudApiGroupsContract` — WhatsApp Cloud API Groups nativo (Meta, Official Business Account): `createGroup()`, `deleteGroup()`, `group()`, `groups()`, `updateGroupSettings()`, `getGroupInviteLink()`, `resetGroupInviteLink()`, `sendGroupInviteTemplate()`, `removeGroupParticipant()`, `getGroupJoinRequests()`, `approveGroupJoinRequest()`, `rejectGroupJoinRequest()`. Implementado en `MetaClient`. Contrato deliberadamente separado de `GroupsContract` (ver sección "Grupos API oficial" arriba) — no lo implementan Z-API/UAZAPI/Funapi.
+- ⚠️ El body de `removeGroupParticipant()`/`approveGroupJoinRequest()`/`rejectGroupJoinRequest()` sigue la convención habitual de Meta (`participants: [{user|user_id}]`) pero no está confirmado contra la referencia completa del Graph API — validar contra un número real antes de depender de esto en producción.
+- ✨ `sendFile()` acepta `$options['type']` (`image`, `video`, `audio`, `document`, `sticker`) para URLs sin extensión — ver [Archivos por URL](#archivos-por-url-sendfile-con-type)
+- ✨ Meta reconoce todas las extensiones que acepta la Cloud API: 3gp, amr, txt, xls, xlsx, ppt, pptx y webp (sticker)
+
+**Fixed:**
+- 🐛 `sendFile()` lee la extensión del path de la URL, no de la URL entera: las URLs firmadas (`foto.jpg?X-Amz-Signature=...`) ya no fallan con `Invalid file extension`. Si el path no tiene, usa la de `fileName`
+- 🐛 Z-API / Z-API Lite: un documento sin extensión devuelve un error claro en vez de armar `send-document/` mal
+- 🐛 Meta: el header de `sendButtons()` también lee la extensión del path de la URL
+- 🐛 Z-API, Z-API Lite, FunApi y UAZAPI mandan como documento `.xls`, `.xlsx`, `.ppt`, `.pptx`, `.csv` y `.txt` sin necesitar `type` (#82). Meta no adivina `.csv`: la Cloud API no lo lista entre sus tipos de documento
 
 ### v0.3.0 - 2025-XX-XX (En desarrollo)
 

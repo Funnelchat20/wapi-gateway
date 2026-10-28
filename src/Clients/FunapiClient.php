@@ -7,6 +7,7 @@ use Funnelchat\WapiGateway\Contracts\InstancesContract;
 use Funnelchat\WapiGateway\Contracts\GroupsContract;
 use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\QueueContract;
+use Funnelchat\WapiGateway\Contracts\ReadReceiptsContract;
 use Funnelchat\WapiGateway\Resources\Zapi\MessageResource;
 use Funnelchat\WapiGateway\Resources\Zapi\QrCodeResource;
 use Funnelchat\WapiGateway\Resources\Zapi\MeResource;
@@ -82,9 +83,45 @@ class FunapiClient extends ZApiClient
     }
 
     /**
+     * whatsgo cannot edit a sent message, so this refuses instead of sending.
+     *
+     * Inheriting {@see ZApiClient::editMessage()} is worse than having no edit
+     * at all: that implementation is `sendText()` carrying `editMessageId`,
+     * and this client's `sendText()` has no such key — the edit left as a
+     * plain send, posting a SECOND message to the chat and returning the
+     * normal success resource, so the caller recorded the original as edited.
+     *
+     * whatsgo's OpenAPI (v3.112.5) documents no `editMessageId` anywhere; its
+     * only "edit" endpoint is `send-edit-event`, which edits an event, not a
+     * message. `isEdit` exists solely on the inbound webhook — whatsgo reports
+     * that a message it received was edited, it does not edit.
+     *
+     * The method stays declared so the refusal is explicit, which also means
+     * `method_exists()` keeps answering true by inheritance: a caller that
+     * probes for the method to build its provider list (communities'
+     * `WapiSentMessageEditor`) will still list funapi, and gets this error
+     * rather than a duplicate. Revisit if Funnelchat20/fun-api#211 is answered
+     * with a real edit endpoint.
+     */
+    public function editMessage(string $uid, string $token, string $phone, string $messageId, string $text): array
+    {
+        return ['error' => 'Editing a sent message is not supported by funapi.'];
+    }
+
+    /**
      * `$options['messageId']` quotes an existing message — same contract and
      * wire field as {@see ZApiClient::sendText()} (funapi mirrors the z-api
      * send-text payload). A blank value is treated as "no quote".
+     *
+     * Mention-all is where funapi does NOT mirror z-api: the caller option
+     * stays `mentionAll` (z-api's field name, what every caller already
+     * sends), but the wire field here is `mentionedAll` — the name whatsgo
+     * documents in `SendTextRequest` and in every other send-* schema
+     * (https://api.whatsgo.wa-api.io/docs/openapi.json, v3.112.5). Sending
+     * z-api's `mentionAll` is not an error: whatsgo drops the unknown field,
+     * answers 200, and delivers the body as plain text — so an `@all` written
+     * in the message reads as literal text instead of mentioning anyone
+     * (communities issue #1730).
      */
     public function sendText(string $uid, string $token, string $to, string $text, array $options = []): array
     {
@@ -92,7 +129,7 @@ class FunapiClient extends ZApiClient
         $url = $this->buildUrl($uid, $token, 'send-text');
         $payload = ['phone' => $to, 'message' => $text];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
-        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
+        if (isset($options['mentionAll'])) $payload['mentionedAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
         if (isset($options['messageId']) && trim((string) $options['messageId']) !== '') $payload['messageId'] = (string) $options['messageId'];
@@ -381,7 +418,9 @@ class FunapiClient extends ZApiClient
     {
         $disconnectUrl = $this->buildUrl($uid, $token, 'disconnect');
         $disc = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->get($disconnectUrl);
-        if ($disc->failed() || $disc->json('error')) return ['error' => $disc->json('error') ?? 'disconnect_failed'];
+        // Best-effort disconnect: a failed disconnect (e.g. an instance already disconnected on the
+        // provider) must NOT skip the cancel below. Cancelling the on-demand subscription is the
+        // point of unsubscribe (stop paying for the instance); the disconnect is only a courtesy logout.
         $url = str_replace(['UID', 'TOKEN'], [$uid, $token], config('funapi.unsubscription_url'));
         $res = Http::withToken(config('funapi.token'))->post($url);
         if ($res->failed() || $res->json('error')) return ['error' => $res->json('error') ?? 'unsubscribe_failed'];
@@ -416,19 +455,32 @@ class FunapiClient extends ZApiClient
         return $res->json('participants') ?? [];
     }
 
+    /**
+     * `$options['voiceNote']` is refused here with `unsupported`, as wapi does
+     * (Funnelchat20/wapi#393). The bridge's send-audio has not been verified
+     * to honour Z-API's `waveform`, and a flag that is silently ignored would
+     * deliver a plain audio while reporting success.
+     *
+     * `$options['type']` (image, video, audio, document or sticker) picks the
+     * endpoint without looking at the URL; otherwise the type comes from the
+     * extension of the URL path, or of `fileName` when the path has none (see
+     * ResolvesMediaType). The URL goes out unchanged. No extension is needed
+     * past that: the bridge's endpoints carry no suffix.
+     */
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
         $startTime = microtime(true);
-        $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
-        $action = $this->mapAction($ext);
-        if ($action === 'invalid') return ['error' => 'Invalid file extension'];
+        $media = $this->resolveMediaType($fileUrl, $options, fn (string $ext) => $this->mapAttr($ext));
+        if (isset($media['error'])) return ['error' => $media['error']];
+        ['type' => $type, 'ext' => $ext] = $media;
+        $action = 'send-' . $type;
+        if ($this->wantsVoiceNote($options)) return $this->voiceNoteUnsupported($this->providerDisplayName());
         // Funapi uses endpoints WITHOUT file type suffix: /send-image, /send-document (not /send-document/pdf)
-        $attr = $this->mapAttr($ext);
-        $params = ['phone' => $to, $attr => $fileUrl];
+        $params = ['phone' => $to, $type => $fileUrl];
         if (isset($options['fileName'])) $params['fileName'] = $options['fileName'];
         if (isset($options['caption'])) $params['caption'] = $options['caption'];
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
-        if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
+        if (isset($options['mentionAll'])) $params['mentionedAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
         if (! in_array($action, self::QUOTE_UNSUPPORTED_ACTIONS, true)) {
@@ -438,7 +490,7 @@ class FunapiClient extends ZApiClient
 
         // Automatically enable async processing for video files (improves performance and prevents timeouts)
         // Can be explicitly disabled by setting $options['async'] = false
-        $isVideo = in_array($ext, ['mp4', 'mov', 'gif']);
+        $isVideo = $type === 'video';
         if ($isVideo && !isset($options['async'])) {
             $params['async'] = true;
         } elseif (isset($options['async'])) {
@@ -496,7 +548,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['name'])) $params['name'] = $options['name'];
         if (isset($options['address'])) $params['address'] = $options['address'];
         if (isset($options['mentioned'])) $params['mentioned'] = $options['mentioned'];
-        if (isset($options['mentionAll'])) $params['mentionAll'] = (bool) $options['mentionAll'];
+        if (isset($options['mentionAll'])) $params['mentionedAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $params['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $params['delayTyping'] = (int) $options['delayTyping'];
         $params = $this->applyQuoteOption($params, $options);
@@ -528,7 +580,7 @@ class FunapiClient extends ZApiClient
             ),
         ];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
-        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
+        if (isset($options['mentionAll'])) $payload['mentionedAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
         $payload = $this->applyTypingOption($payload, $options);
@@ -551,15 +603,30 @@ class FunapiClient extends ZApiClient
     {
         $startTime = microtime(true);
         $endpoint = $this->buildUrl($uid, $token, 'send-button-actions');
+        // FunApi's send-button-actions handler expects `buttons[]` at the top level
+        // with `{id, type, label, url}` items — NOT the Z-API-compatible
+        // `buttonActions[].{type: URL, url, label}` shape. Mirrors the contract
+        // adaptation already applied to sendButtons()/sendOptionList():
+        //  - field is `buttons`, not `buttonActions` (missing `buttons` →
+        //    FunApi 400 "At least one button is required")
+        //  - each button requires an `id`
+        //  - a link button's type is the enum value `cta_url`, not `URL`
+        //  - `url` is required for the `cta_url` type
+        // Label is capped at 25 chars per the provider doc.
         $payload = [
             'phone' => $to,
             'message' => $message,
-            'buttonActions' => [
-                ['type' => 'URL', 'url' => $url, 'label' => $label]
+            'buttons' => [
+                [
+                    'id'    => (string) ($options['buttonId'] ?? uniqid()),
+                    'type'  => 'cta_url',
+                    'label' => mb_substr($label, 0, 25),
+                    'url'   => $url,
+                ],
             ],
         ];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
-        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
+        if (isset($options['mentionAll'])) $payload['mentionedAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
         $payload = $this->applyTypingOption($payload, $options);
@@ -575,6 +642,64 @@ class FunapiClient extends ZApiClient
         }
 
         $this->logRequest('sendButtonLink', $uid, ['phone' => $to], $startTime, $res, $endpoint, $payload);
+        return MessageResource::make($res->json());
+    }
+
+    /**
+     * FunApi's send-ptv handler expects the video in the `video` field — NOT the
+     * Z-API-compatible `ptv` field that {@see ZApiClient::sendPtv()} sends. With
+     * `ptv` instead of `video`, FunApi 400s with "Video is required (URL or
+     * base64)". Overridden here (same contract-mismatch fix already applied to
+     * sendButtons()/sendOptionList()/sendButtonLink()) so the monolith's PTV
+     * sends reach FunApi correctly. `video` accepts an HTTPS URL or a base64
+     * data URI. `$options['messageId']` quotes an existing message.
+     */
+    public function sendPtv(string $uid, string $token, string $to, string $videoUrl, array $options = []): array
+    {
+        $startTime = microtime(true);
+        $url = $this->buildUrl($uid, $token, 'send-ptv');
+        $payload = ['phone' => $to, 'video' => $videoUrl];
+        if (isset($options['caption'])) $payload['caption'] = $options['caption'];
+        if (isset($options['viewOnce'])) $payload['viewOnce'] = (bool) $options['viewOnce'];
+        if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
+        if (isset($options['mentionAll'])) $payload['mentionedAll'] = (bool) $options['mentionAll'];
+        if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
+        if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
+        $payload = $this->applyQuoteOption($payload, $options);
+        $payload = $this->applyTypingOption($payload, $options);
+
+        $request = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
+            ->timeout((int) ($options['timeout'] ?? config('funapi.timeout', 120)));
+
+        if ($options['retry'] ?? false) {
+            $request = $request->retry(
+                config('funapi.max_attempts', 2),
+                config('funapi.retry_delay', 500),
+                function ($exception, $request) {
+                    // Don't retry on timeout (prevents duplicates)
+                    if ($exception instanceof \Illuminate\Http\Client\RequestException &&
+                        str_contains($exception->getMessage(), 'cURL error 28')) {
+                        return false;
+                    }
+                    // Only retry on ConnectionException
+                    return $exception instanceof ConnectionException;
+                },
+                false
+            );
+        }
+
+        $res = $request->post($url, $payload);
+
+        $context = ['phone' => $to, 'has_retry' => $options['retry'] ?? false];
+
+        if ($res->failed() || $res->json('error')) {
+            $error = $this->formatError($res->json('error', 'error'));
+            $context['error'] = $error;
+            $this->logRequest('sendPtv', $uid, $context, $startTime, $res, $url, $payload);
+            return ['error' => $error];
+        }
+
+        $this->logRequest('sendPtv', $uid, $context, $startTime, $res, $url, $payload);
         return MessageResource::make($res->json());
     }
 
@@ -633,7 +758,7 @@ class FunapiClient extends ZApiClient
         ];
         if (isset($options['pollMaxOptions'])) $payload['pollMaxOptions'] = (int) $options['pollMaxOptions'];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
-        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
+        if (isset($options['mentionAll'])) $payload['mentionedAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
 
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
@@ -663,7 +788,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['linkDescription'])) $payload['linkDescription'] = $options['linkDescription'];
         if (isset($options['image'])) $payload['image'] = $options['image'];
         if (isset($options['mentioned'])) $payload['mentioned'] = $options['mentioned'];
-        if (isset($options['mentionAll'])) $payload['mentionAll'] = (bool) $options['mentionAll'];
+        if (isset($options['mentionAll'])) $payload['mentionedAll'] = (bool) $options['mentionAll'];
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
         $payload = $this->applyQuoteOption($payload, $options);
@@ -706,7 +831,7 @@ class FunapiClient extends ZApiClient
         return MessageResource::make($res->json());
     }
 
-    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
+    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components, array $options = []): array
     {
         // Templates are a WhatsApp Cloud API feature, not available on whatsmeow-based providers
         return ['error' => 'sendTemplate() is not supported by Funapi provider. Use WhatsApp Cloud API for templates.'];
@@ -860,6 +985,23 @@ class FunapiClient extends ZApiClient
     }
 
     /**
+     * Not inherited from ZApiClient on purpose. The bridge's own API
+     * description (the "FunnelChat API (Whatsmeow Bridge)" Postman collection
+     * in this repo) lists no read-message endpoint, and it publishes no other
+     * docs. Calling the z-api path blindly would turn "not implemented" into
+     * an opaque 404 at best. So this answers UNSUPPORTED without a request,
+     * until the bridge documents one. markMessageAsReadWithTyping() is
+     * inherited and unsupported as well.
+     */
+    public function markMessageAsRead(string $uid, string $token, string $chat, string $messageId): array
+    {
+        return [
+            'error' => ReadReceiptsContract::UNSUPPORTED,
+            'message' => 'FunApi does not support marking a message as read.',
+        ];
+    }
+
+    /**
      * The reaction routing itself is inherited from ZApiClient — the bridge
      * mirrors z-api's send-reaction / send-remove-reaction split, so only the
      * payload needs widening.
@@ -902,17 +1044,6 @@ class FunapiClient extends ZApiClient
         return $res->json();
     }
 
-    protected function mapAction(string $ext): string
-    {
-        return [
-            'jpg' => 'send-image', 'jpeg' => 'send-image', 'png' => 'send-image',
-            'gif' => 'send-video', 'mp4' => 'send-video', 'mov' => 'send-video',
-            'aac' => 'send-audio', 'oga' => 'send-audio', 'ogg' => 'send-audio', 'mp3' => 'send-audio', 'm4a' => 'send-audio', 'opus' => 'send-audio', 'wav' => 'send-audio',
-            'pdf' => 'send-document', 'doc' => 'send-document', 'docx' => 'send-document',
-            'svg' => 'send-sticker', 'webp' => 'send-sticker'
-        ][$ext] ?? 'invalid';
-    }
-
     protected function mapAttr(string $ext): string
     {
         return [
@@ -920,6 +1051,7 @@ class FunapiClient extends ZApiClient
             'gif' => 'video', 'mp4' => 'video', 'mov' => 'video',
             'aac' => 'audio', 'oga' => 'audio', 'ogg' => 'audio', 'mp3' => 'audio', 'm4a' => 'audio', 'opus' => 'audio', 'wav' => 'audio',
             'pdf' => 'document', 'doc' => 'document', 'docx' => 'document',
+            'xls' => 'document', 'xlsx' => 'document', 'ppt' => 'document', 'pptx' => 'document', 'csv' => 'document', 'txt' => 'document',
             'svg' => 'sticker', 'webp' => 'sticker'
         ][$ext] ?? 'invalid';
     }
@@ -1042,7 +1174,7 @@ class FunapiClient extends ZApiClient
         $payload = ['autoInvite' => true, 'groupId' => $id, 'phones' => $phones];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
         $this->logRequest('addParticipants', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        if ($res->failed() || $res->json('error')) return $this->groupError($res);
         return ['success' => true];
     }
 
@@ -1053,7 +1185,7 @@ class FunapiClient extends ZApiClient
         $payload = ['groupId' => $id, 'phones' => $phones];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
         $this->logRequest('addAdmins', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        if ($res->failed() || $res->json('error')) return $this->groupError($res);
         return ['success' => true];
     }
 
@@ -1064,7 +1196,7 @@ class FunapiClient extends ZApiClient
         $payload = ['communityId' => $id, 'phones' => $phones];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
         $this->logRequest('addCommunityAdmins', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        if ($res->failed() || $res->json('error')) return $this->groupError($res);
         return ['success' => true];
     }
 
@@ -1075,7 +1207,7 @@ class FunapiClient extends ZApiClient
         $payload = ['groupId' => $id, 'phones' => $phones];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
         $this->logRequest('removeParticipants', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        if ($res->failed() || $res->json('error')) return $this->groupError($res);
         return ['success' => true];
     }
 
@@ -1086,7 +1218,7 @@ class FunapiClient extends ZApiClient
         $payload = ['groupId' => $id, 'phones' => $phones];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
         $this->logRequest('removeAdmins', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        if ($res->failed() || $res->json('error')) return $this->groupError($res);
         return ['success' => true];
     }
 
@@ -1097,7 +1229,7 @@ class FunapiClient extends ZApiClient
         $payload = ['communityId' => $id, 'phones' => $phones];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
         $this->logRequest('removeCommunityAdmins', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        if ($res->failed() || $res->json('error')) return $this->groupError($res);
         return ['success' => true];
     }
 
@@ -1108,7 +1240,7 @@ class FunapiClient extends ZApiClient
         $payload = ['communityId' => $id, 'phones' => $phones];
         $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->post($url, $payload);
         $this->logRequest('removeCommunityParticipant', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
+        if ($res->failed() || $res->json('error')) return $this->groupError($res);
         return ['success' => true];
     }
 
@@ -1265,6 +1397,77 @@ class FunapiClient extends ZApiClient
         return ['error' => 'deleteMessageForMe is not supported by Funapi provider'];
     }
 
+    /**
+     * Funapi's `code` field -> this bridge's canonical error vocabulary.
+     *
+     * The `code` is the ONLY discriminating field on a group operation failure:
+     * Funapi reuses one `error` string across unrelated outcomes. Measured in
+     * production over 7 days (2026-09-22..29), `"group participant operation
+     * rejected"` alone covered four codes:
+     *
+     *   participant_already_in_group (409) x26   <- desired state already holds
+     *   group_resource_not_found     (404) x8    <- real failure
+     *   group_action_forbidden       (403) x1    <- real failure
+     *   group_upstream_failure       (502) x1    <- real failure
+     *
+     * Consumers that keyed off the string could not tell them apart, so a
+     * caller wanting to treat "already a participant" as success would have
+     * swallowed ten genuine failures. Map by `code`, never by the message.
+     */
+    private const FUNAPI_GROUP_CODE_MAP = [
+        'participant_already_in_group' => 'already_participant',
+        'participant_operation_partial' => 'partial_success',
+        'group_rate_limited' => 'rate_limited',
+        'group_resource_not_found' => 'group_not_found',
+        'group_action_forbidden' => 'group_forbidden',
+        'group_upstream_failure' => 'upstream_failure',
+    ];
+
+    /**
+     * Fallback for Funapi failures that carry no `code` (the 503/400 family).
+     *
+     * `formatError()` below is inherited z-api vocabulary and matches none of
+     * Funapi's actual strings, so without this table these fell through raw and
+     * every consumer classified them as a generic terminal failure — including
+     * the transient "client not connected", which is the one case that should
+     * not count against the user.
+     *
+     * Note `phones are required` is Funapi's message for a phone it cannot
+     * parse as E.164; the array is present and non-empty when it says this.
+     */
+    private const FUNAPI_GROUP_MESSAGE_MAP = [
+        'whatsapp client not connected' => 'not_connected',
+        'whatsapp connection dropped before the group request completed' => 'not_connected',
+        'phones are required' => 'invalid_phone_format',
+    ];
+
+    /**
+     * Build the error payload for a failed group participant/admin operation.
+     *
+     * Returns the canonical `error` plus the raw `code` and HTTP `status`, so a
+     * consumer can act on the specific outcome without re-parsing messages.
+     * Additive by design: callers that only read `error` keep working.
+     */
+    protected function groupError(\Illuminate\Http\Client\Response $res): array
+    {
+        $code = $res->json('code');
+        $rawMessage = $res->json('error', 'error');
+
+        $canonical = null;
+
+        if (is_string($code) && isset(self::FUNAPI_GROUP_CODE_MAP[$code])) {
+            $canonical = self::FUNAPI_GROUP_CODE_MAP[$code];
+        } elseif (is_string($rawMessage)) {
+            $canonical = self::FUNAPI_GROUP_MESSAGE_MAP[strtolower(trim($rawMessage))] ?? null;
+        }
+
+        return [
+            'error' => $canonical ?? $this->formatError($rawMessage),
+            'code' => is_string($code) ? $code : null,
+            'status' => $res->status(),
+        ];
+    }
+
     protected function formatError(mixed $error): string
     {
         if (is_array($error)) {
@@ -1329,6 +1532,31 @@ class FunapiClient extends ZApiClient
             'phone' => $raw['Phone'] ?? $raw['phone'] ?? $raw['to'] ?? null,
             'fileUrl' => $raw['ImageUrl'] ?? $raw['imageUrl'] ?? $raw['DocumentUrl'] ?? $raw['documentUrl'] ?? $raw['VideoUrl'] ?? $raw['videoUrl'] ?? $raw['AudioUrl'] ?? $raw['audioUrl'] ?? $raw['fileUrl'] ?? '',
             'caption' => $raw['Caption'] ?? $raw['caption'] ?? '',
+            // Funapi-only (3.113.0+): the operation state and what WhatsApp
+            // answered. `uncertain` + `serverCode: 479` means WhatsApp refused
+            // that send and funapi never resends it; any other `uncertain`
+            // (timeout, 475, 420, 451) may still have been delivered.
+            'status' => isset($raw['status']) && is_string($raw['status']) ? $raw['status'] : null,
+            'errors' => array_values(array_filter((array) ($raw['errors'] ?? []), 'is_string')),
+            'lastFailure' => $this->normalizeQueueLastFailure($raw['lastFailure'] ?? null),
+        ];
+    }
+
+    /**
+     * @return array{phase: ?string, code: ?string, serverCode: ?int}|null
+     */
+    private function normalizeQueueLastFailure(mixed $raw): ?array
+    {
+        if (! is_array($raw)) {
+            return null;
+        }
+
+        $serverCode = $raw['serverCode'] ?? null;
+
+        return [
+            'phase' => isset($raw['phase']) && is_string($raw['phase']) ? $raw['phase'] : null,
+            'code' => isset($raw['code']) && is_string($raw['code']) ? $raw['code'] : null,
+            'serverCode' => is_numeric($serverCode) ? (int) $serverCode : null,
         ];
     }
 

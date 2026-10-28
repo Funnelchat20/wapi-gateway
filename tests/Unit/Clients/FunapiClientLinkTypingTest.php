@@ -74,4 +74,56 @@ class FunapiClientLinkTypingTest extends TestCase
 
         Http::assertSent(fn($request) => ! array_key_exists('delayTyping', $request->data()));
     }
+
+    public function test_send_button_link_builds_the_funapi_buttons_payload(): void
+    {
+        $this->fakeFunapi();
+
+        (new FunapiClient())->sendButtonLink('UID', 'TOKEN', '5491100000000', 'Mirá esto', 'https://tienda.example.com/promo', 'Ver promo', [
+            'buttonId' => 'promo-1',
+        ]);
+
+        Http::assertSent(function ($request) {
+            $data = $request->data();
+
+            // FunApi expects `buttons`, never the z-api `buttonActions`.
+            return str_contains($request->url(), 'send-button-actions')
+                && ! array_key_exists('buttonActions', $data)
+                && is_array($data['buttons'] ?? null)
+                && count($data['buttons']) === 1
+                && $data['buttons'][0] === [
+                    'id'    => 'promo-1',
+                    'type'  => 'cta_url',
+                    'label' => 'Ver promo',
+                    'url'   => 'https://tienda.example.com/promo',
+                ];
+        });
+    }
+
+    public function test_send_button_link_generates_a_button_id_when_not_provided(): void
+    {
+        $this->fakeFunapi();
+
+        (new FunapiClient())->sendButtonLink('UID', 'TOKEN', '5491100000000', 'Mirá esto', 'https://tienda.example.com/promo', 'Ver promo');
+
+        Http::assertSent(function ($request) {
+            $button = $request->data()['buttons'][0] ?? [];
+
+            return isset($button['id'])
+                && $button['id'] !== ''
+                && $button['type'] === 'cta_url'
+                && $button['url'] === 'https://tienda.example.com/promo';
+        });
+    }
+
+    public function test_send_button_link_caps_the_label_at_25_chars(): void
+    {
+        $this->fakeFunapi();
+
+        $longLabel = str_repeat('A', 40);
+
+        (new FunapiClient())->sendButtonLink('UID', 'TOKEN', '5491100000000', 'Mirá esto', 'https://tienda.example.com/promo', $longLabel);
+
+        Http::assertSent(fn($request) => mb_strlen($request->data()['buttons'][0]['label']) === 25);
+    }
 }

@@ -6,17 +6,23 @@ use Funnelchat\WapiGateway\Contracts\MessagesContract;
 use Funnelchat\WapiGateway\Contracts\InstancesContract;
 use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\TemplatesContract;
+use Funnelchat\WapiGateway\Contracts\ReadReceiptsContract;
 use Funnelchat\WapiGateway\Helpers\BucketFile;
+use Funnelchat\WapiGateway\Contracts\CloudApiGroupsContract;
 use Funnelchat\WapiGateway\Helpers\WhatsAppCloudHelper;
 use Funnelchat\WapiGateway\Jobs\StoreDeviceLogJob;
 use Funnelchat\WapiGateway\Resources\Meta\MessageResource;
 use Funnelchat\WapiGateway\Resources\Zapi\BusinessProfileResource;
+use Funnelchat\WapiGateway\Traits\HandlesVoiceNoteOption;
 use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
+use Funnelchat\WapiGateway\Traits\ResolvesMediaType;
 use Illuminate\Support\Facades\Http;
 
-class MetaClient implements MessagesContract, InstancesContract, ContactsContract, TemplatesContract
+class MetaClient implements MessagesContract, InstancesContract, ContactsContract, TemplatesContract, ReadReceiptsContract, CloudApiGroupsContract
 {
     use LogsDeviceRequests;
+    use HandlesVoiceNoteOption;
+    use ResolvesMediaType;
 
     protected function getProviderName(): string
     {
@@ -45,12 +51,36 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
      * the phone path byte-identical to what it was before BSUID support — the
      * value is passed through untouched, trimming only on the (new) BSUID
      * branch, where isBsuid() already ignored the padding to classify it.
+     *
+     * A group destination is the third case: Meta addresses it through `to`
+     * like a phone, but only once `recipient_type: group` says so. The caller
+     * declares it with $options[self::RECIPIENT_TYPE_OPTION] — never inferred
+     * from the shape of $to, because a group id is opaque and a heuristic here
+     * would misroute a 1:1 send the day Meta changes that shape.
      */
-    private function recipientField(string $to): array
+    private function recipientField(string $to, array $options = []): array
     {
+        if ($this->isGroupRecipient($options)) {
+            return ['recipient_type' => 'group', 'to' => $to];
+        }
+
         return WhatsAppCloudHelper::isBsuid($to)
             ? ['recipient_type' => 'individual', 'recipient' => trim($to)]
             : ['to' => $to];
+    }
+
+    /**
+     * Opt-in key a caller sets to say "this destination is a group". Kept in
+     * the existing $options bag so no send signature changes for the 1:1
+     * callers, which are every caller that exists today.
+     */
+    public const RECIPIENT_TYPE_OPTION = 'recipientType';
+
+    public const RECIPIENT_TYPE_GROUP = 'group';
+
+    private function isGroupRecipient(array $options): bool
+    {
+        return ($options[self::RECIPIENT_TYPE_OPTION] ?? null) === self::RECIPIENT_TYPE_GROUP;
     }
 
     /**
@@ -117,7 +147,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $url = $this->messagesUrl($uid, $to);
         $payload = [
             'messaging_product' => 'whatsapp',
-            ...$this->recipientField($to),
+            ...$this->recipientField($to, $options),
             'type' => 'text',
             'text' => ['body' => $text],
         ];
@@ -164,17 +194,49 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     public function updateWebhookReceived(string $uid, string $token, int $userId, int $deviceId, bool $privateMessages = false): array { return []; }
     public function updateWebhookReceivedAndDelivery(string $uid, string $token, int $userId, int $deviceId): array { return []; }
 
+    /**
+     * Meta plays `audio.voice = true` as a voice message only for OGG files
+     * encoded with OPUS. `oga` is missing on purpose: mapType() does not
+     * accept it for Cloud sends at all.
+     */
+    private const VOICE_NOTE_EXTENSIONS = ['ogg', 'opus'];
+
+    /**
+     * `$options['voiceNote'] = true` sends an audio as a voice message
+     * (`audio.voice = true`). Meta requires OGG audio encoded with OPUS for
+     * that, so any other file is refused with `invalid_voice_note_file`
+     * before anything is sent. See
+     * https://developers.facebook.com/docs/whatsapp/cloud-api/messages/audio-messages
+     * (read 2026-10-16): "Set to true if sending a voice message. Voice
+     * messages must be Ogg files encoded with the OPUS codec." The
+     * extension checked is the one {@see ResolvesMediaType} finds: the URL
+     * path's, or `fileName`'s when the path has none.
+     *
+     * `$options['type']` (image, video, audio, document or sticker) is sent
+     * as the message type without looking at the URL; otherwise the type
+     * comes from the extension of the URL path. The URL goes out unchanged.
+     */
     public function sendFile(string $uid, string $token, string $to, string $fileUrl, array $options = []): array
     {
-        $ext = strtolower(pathinfo($fileUrl, PATHINFO_EXTENSION));
-        $type = $this->mapType($ext);
-        if ($type === 'invalid') return ['error' => 'Invalid file extension'];
+        $media = $this->resolveMediaType($fileUrl, $options, fn (string $ext) => $this->mapType($ext));
+        if (isset($media['error'])) return ['error' => $media['error']];
+        ['type' => $type, 'ext' => $ext] = $media;
+        // Validated before the typing indicator, which marks the inbound as
+        // read: a refused voice note must leave no side effect.
+        $voiceNote = $this->wantsVoiceNote($options);
+        if ($voiceNote && $type !== 'audio') {
+            return $this->invalidVoiceNoteFile('A voice note must be an audio file.');
+        }
+        if ($voiceNote && !in_array($ext, self::VOICE_NOTE_EXTENSIONS, true)) {
+            return $this->invalidVoiceNoteFile('WhatsApp Cloud API voice notes must be OGG audio encoded with OPUS (.ogg or .opus).');
+        }
         $typingResult = $this->fireTypingIndicator($uid, $token, $options);
         $startTime = microtime(true);
         $media = isset($options['mediaId']) ? ['id' => $options['mediaId']] : ['link' => $fileUrl];
-        $payload = ['messaging_product' => 'whatsapp', ...$this->recipientField($to), 'type' => $type, $type => $media];
+        $payload = ['messaging_product' => 'whatsapp', ...$this->recipientField($to, $options), 'type' => $type, $type => $media];
         if (isset($options['fileName']) && $type === 'document') $payload[$type]['filename'] = $options['fileName'];
         if (isset($options['caption']) && in_array($type, ['image', 'video', 'document'])) $payload[$type]['caption'] = $options['caption'];
+        if ($voiceNote) $payload['audio']['voice'] = true;
         $payload = $this->applyQuoteOption($payload, $options);
         $url = $this->messagesUrl($uid, $to);
         $res = Http::withToken($token)->post($url, $payload);
@@ -208,11 +270,16 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         // Validate the header media before firing the typing indicator: the
         // indicator marks the inbound as read, a side effect we must not emit
         // for a send that will never happen.
+        // The extension comes from the URL path, as in sendFile(). An
+        // interactive header takes no sticker, so webp stays refused here.
         $headerType = null;
         if (isset($options['fileUrl'])) {
-            $ext = strtolower(pathinfo($options['fileUrl'], PATHINFO_EXTENSION));
-            $headerType = $this->mapType($ext);
-            if ($headerType === 'invalid') return ['error' => 'Invalid file extension'];
+            $media = $this->resolveMediaType($options['fileUrl'], [], function (string $ext) {
+                $type = $this->mapType($ext);
+                return $type === 'sticker' ? 'invalid' : $type;
+            });
+            if (isset($media['error'])) return ['error' => $media['error']];
+            $headerType = $media['type'];
         }
         $typingResult = $this->fireTypingIndicator($uid, $token, $options);
         $startTime = microtime(true);
@@ -380,12 +447,12 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
      * template to a BSUID is the caller's call to avoid — Meta rejects it at
      * send time rather than the payload being built wrong here.
      */
-    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components): array
+    public function sendTemplate(string $uid, string $token, string $to, string $name, string $languageCode, array $components, array $options = []): array
     {
         $startTime = microtime(true);
         $payload = [
             'messaging_product' => 'whatsapp',
-            ...$this->recipientField($to),
+            ...$this->recipientField($to, $options),
             'type' => 'template',
             'template' => [
                 'name' => $name,
@@ -403,13 +470,22 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return MessageResource::make($res->json());
     }
 
+    /**
+     * The extensions of the media types the Cloud API accepts (image: jpeg,
+     * png; video: mp4, 3gp; audio: aac, amr, mp3, m4a, ogg; document: txt,
+     * xls(x), doc(x), ppt(x), pdf; sticker: webp). gif, mov, opus and wav
+     * predate that list and keep their mapping, so no URL that resolved
+     * before stops resolving.
+     */
     private function mapType(string $ext): string
     {
         return [
             'jpg' => 'image', 'jpeg' => 'image', 'png' => 'image',
-            'gif' => 'video', 'mp4' => 'video', 'mov' => 'video',
-            'mp3' => 'audio', 'ogg' => 'audio', 'aac' => 'audio', 'm4a' => 'audio', 'opus' => 'audio', 'wav' => 'audio',
-            'pdf' => 'document', 'doc' => 'document', 'docx' => 'document'
+            'gif' => 'video', 'mp4' => 'video', 'mov' => 'video', '3gp' => 'video',
+            'mp3' => 'audio', 'ogg' => 'audio', 'aac' => 'audio', 'm4a' => 'audio', 'opus' => 'audio', 'wav' => 'audio', 'amr' => 'audio',
+            'pdf' => 'document', 'doc' => 'document', 'docx' => 'document', 'txt' => 'document',
+            'xls' => 'document', 'xlsx' => 'document', 'ppt' => 'document', 'pptx' => 'document',
+            'webp' => 'sticker',
         ][$ext] ?? 'invalid';
     }
 
@@ -506,6 +582,82 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         return ['success' => true];
     }
 
+    /**
+     * Cloud API read receipt, confirmed against
+     * https://developers.facebook.com/docs/whatsapp/cloud-api/guides/mark-message-as-read
+     * (read 2026-10-16):
+     *
+     *     POST /<PHONE_NUMBER_ID>/messages
+     *     {"messaging_product": "whatsapp", "status": "read", "message_id": "<WAMID>"}
+     *     → {"success": true}
+     *
+     * "When you mark a message as read, the API also marks earlier messages in
+     * the conversation as read." Meta only accepts messages received in the
+     * last 30 days, and answers 131009 for an id that is not a received wamid.
+     * $chat is not part of the payload: the wamid locates the message.
+     */
+    public function markMessageAsRead(string $uid, string $token, string $chat, string $messageId): array
+    {
+        return $this->postReadReceipt('markMessageAsRead', $uid, $token, $messageId, false);
+    }
+
+    /**
+     * The same read receipt with `typing_indicator`, per
+     * https://developers.facebook.com/docs/whatsapp/cloud-api/typing-indicators
+     * (read 2026-10-16): `"typing_indicator": {"type": "text"}` on the body
+     * above, same `{"success": true}` answer. It marks the message as read
+     * too. "The typing indicator will be dismissed once you respond, or after
+     * 25 seconds, whichever comes first."
+     *
+     * Same wire as sendTypingIndicator(), which stays as it was. This one
+     * belongs to ReadReceiptsContract and is stricter: it only reports
+     * success when Meta answers `success: true`.
+     */
+    public function markMessageAsReadWithTyping(string $uid, string $token, string $chat, string $messageId): array
+    {
+        return $this->postReadReceipt('markMessageAsReadWithTyping', $uid, $token, $messageId, true);
+    }
+
+    /**
+     * Same bound as the typing indicator: a read receipt is one small call,
+     * and a caller that waits on it should not hang on a slow Graph.
+     */
+    private const READ_RECEIPT_TIMEOUT = 5;
+
+    /**
+     * Never throws. Success requires a 2xx AND `success: true`, which is what
+     * Meta documents as the confirmation. Any other answer is an error that
+     * carries Meta's own `error` object when there is one.
+     */
+    private function postReadReceipt(string $method, string $uid, string $token, string $messageId, bool $withTyping): array
+    {
+        if (trim($messageId) === '') {
+            return ['error' => 'A message id is required'];
+        }
+        $startTime = microtime(true);
+        $url = $this->graph . $uid . '/messages';
+        $payload = [
+            'messaging_product' => 'whatsapp',
+            'status' => 'read',
+            'message_id' => $messageId,
+        ];
+        if ($withTyping) $payload['typing_indicator'] = ['type' => 'text'];
+        try {
+            $res = Http::withToken($token)->timeout(self::READ_RECEIPT_TIMEOUT)->post($url, $payload);
+        } catch (\Throwable $e) {
+            $error = $this->sanitizeUrl($e->getMessage());
+            $this->logRequest($method, $uid, ['error' => $error, 'message_id' => $messageId], $startTime, null, $url, $payload);
+            return ['error' => $error];
+        }
+        if ($res->failed() || $res->json('success') !== true) {
+            $error = $res->json('error') ?? 'Read receipt not confirmed by the provider';
+            $this->logRequest($method, $uid, ['error' => $error, 'message_id' => $messageId], $startTime, $res, $url, $payload);
+            return ['error' => $error];
+        }
+        $this->logRequest($method, $uid, ['message_id' => $messageId], $startTime, $res, $url, $payload);
+        return ['success' => true];
+    }
+
     public function handlesTypingDelayServerSide(): bool
     {
         // Meta discards the indicator as soon as the message arrives, so making
@@ -591,7 +743,10 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'type' => 'contacts',
             'contacts' => [[
                 'name' => ['formatted_name' => $contactName, 'first_name' => $contactName],
-                'phones' => [[ 'phone' => $contactPhone, 'wa_id' => $contactPhone ]]
+                'phones' => [[
+                    'phone' => WhatsAppCloudHelper::contactPhoneField($contactPhone),
+                    'wa_id' => WhatsAppCloudHelper::contactWaId($contactPhone),
+                ]]
             ]]
         ];
         $payload = $this->applyQuoteOption($payload, $options);
@@ -773,5 +928,227 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         }
         $this->logRequest('uploadHeaderHandle', $appId, [], $startTime, $response, $uploadUrl);
         return $response->json();
+    }
+
+    /**
+     * Cloud API Groups is newer than the v20.0 pin: reuses the same v26.0
+     * already validated for BSUID-aware sends rather than introducing a
+     * third pinned version. Confirm this is still current before relying on
+     * it — Meta's minimum required version for Groups was not independently
+     * verified against the Graph API reference.
+     */
+    private const GROUPS_GRAPH_VERSION = 'v26.0';
+
+    private function groupsUrl(string $path): string
+    {
+        return 'https://graph.facebook.com/' . self::GROUPS_GRAPH_VERSION . '/' . $path;
+    }
+
+    /**
+     * Mirrors recipientField(): Meta identifies a group participant by
+     * `user` (phone) or `user_id` (BSUID), never both. Shared by every
+     * participant-targeting method below (remove, approve, reject) so the
+     * BSUID/phone decision lives in one place.
+     */
+    private function participantField(string $participant): array
+    {
+        return WhatsAppCloudHelper::isBsuid($participant)
+            ? ['user_id' => trim($participant)]
+            : ['user' => $participant];
+    }
+
+    /**
+     * Confirmed against a real Cloud API Groups call (staging, 2026-09-08):
+     * Meta rejected a payload keyed `name` with "missing: 'messaging_product',
+     * missing: 'subject'" — the group's title is `subject`, not `name`, and
+     * `messaging_product` is required here too, not just on /messages.
+     */
+    public function createGroup(string $uid, string $token, string $name, array $options = []): array
+    {
+        $startTime = microtime(true);
+        $payload = array_merge(['messaging_product' => 'whatsapp', 'subject' => $name], $options);
+        $url = $this->groupsUrl($uid . '/groups');
+        $res = Http::withToken($token)->post($url, $payload);
+        if ($res->failed()) {
+            $this->logRequest('createGroup', $uid, ['error' => $res->json('error', 'Failed to create group'), 'name' => $name], $startTime, $res, $url, $payload);
+            return ['error' => $res->json('error', 'Failed to create group')];
+        }
+        $this->logRequest('createGroup', $uid, ['name' => $name], $startTime, $res, $url, $payload);
+        return $res->json();
+    }
+
+    public function deleteGroup(string $uid, string $token, string $groupId): array
+    {
+        $startTime = microtime(true);
+        $url = $this->groupsUrl($groupId);
+        $res = Http::withToken($token)->delete($url);
+        if ($res->failed()) {
+            $this->logRequest('deleteGroup', $uid, ['error' => $res->json('error', 'Failed to delete group'), 'group_id' => $groupId], $startTime, $res, $url);
+            return ['error' => $res->json('error', 'Failed to delete group')];
+        }
+        $this->logRequest('deleteGroup', $uid, ['group_id' => $groupId], $startTime, $res, $url);
+        return $res->json();
+    }
+
+    public function group(string $uid, string $token, string $groupId, array $fields = []): array
+    {
+        $startTime = microtime(true);
+        $url = $this->groupsUrl($groupId);
+        if (!empty($fields)) {
+            $url .= '?fields=' . urlencode(implode(',', $fields));
+        }
+        $res = Http::withToken($token)->get($url);
+        if ($res->failed()) {
+            $this->logRequest('group', $uid, ['error' => $res->json('error', 'Failed to get group'), 'group_id' => $groupId], $startTime, $res, $url);
+            return ['error' => $res->json('error', 'Failed to get group')];
+        }
+        $this->logRequest('group', $uid, ['group_id' => $groupId], $startTime, $res, $url);
+        return $res->json();
+    }
+
+    public function groups(string $uid, string $token, array $options = []): array
+    {
+        $startTime = microtime(true);
+        $url = $this->groupsUrl($uid . '/groups');
+        if (!empty($options)) {
+            $query = [];
+            if (isset($options['limit'])) $query['limit'] = $options['limit'];
+            if (isset($options['after'])) $query['after'] = $options['after'];
+            if (!empty($query)) $url .= '?' . http_build_query($query);
+        }
+        $res = Http::withToken($token)->get($url);
+        if ($res->failed()) {
+            $this->logRequest('groups', $uid, ['error' => $res->json('error', 'Failed to list groups')], $startTime, $res, $url);
+            return ['error' => $res->json('error', 'Failed to list groups')];
+        }
+        $this->logRequest('groups', $uid, [], $startTime, $res, $url);
+        return $res->json();
+    }
+
+    /**
+     * $settings is passed through verbatim — its field names (e.g. whether the
+     * description key matches createGroup()'s `subject` naming convention) are
+     * NOT confirmed against a real call the way createGroup()'s was; validate
+     * before relying on this against production.
+     */
+    public function updateGroupSettings(string $uid, string $token, string $groupId, array $settings): array
+    {
+        $startTime = microtime(true);
+        $url = $this->groupsUrl($groupId);
+        $res = Http::withToken($token)->post($url, $settings);
+        if ($res->failed()) {
+            $this->logRequest('updateGroupSettings', $uid, ['error' => $res->json('error', 'Failed to update group settings'), 'group_id' => $groupId], $startTime, $res, $url, $settings);
+            return ['error' => $res->json('error', 'Failed to update group settings')];
+        }
+        $this->logRequest('updateGroupSettings', $uid, ['group_id' => $groupId], $startTime, $res, $url, $settings);
+        return $res->json();
+    }
+
+    public function getGroupInviteLink(string $uid, string $token, string $groupId): array
+    {
+        $startTime = microtime(true);
+        $url = $this->groupsUrl($groupId . '/invite_link');
+        $res = Http::withToken($token)->get($url);
+        if ($res->failed()) {
+            $this->logRequest('getGroupInviteLink', $uid, ['error' => $res->json('error', 'Failed to get invite link'), 'group_id' => $groupId], $startTime, $res, $url);
+            return ['error' => $res->json('error', 'Failed to get invite link')];
+        }
+        $this->logRequest('getGroupInviteLink', $uid, ['group_id' => $groupId], $startTime, $res, $url);
+        return $res->json();
+    }
+
+    public function resetGroupInviteLink(string $uid, string $token, string $groupId): array
+    {
+        $startTime = microtime(true);
+        $url = $this->groupsUrl($groupId . '/invite_link');
+        $res = Http::withToken($token)->post($url);
+        if ($res->failed()) {
+            $this->logRequest('resetGroupInviteLink', $uid, ['error' => $res->json('error', 'Failed to reset invite link'), 'group_id' => $groupId], $startTime, $res, $url);
+            return ['error' => $res->json('error', 'Failed to reset invite link')];
+        }
+        $this->logRequest('resetGroupInviteLink', $uid, ['group_id' => $groupId], $startTime, $res, $url);
+        return $res->json();
+    }
+
+    /**
+     * Delegates to sendTemplate() rather than duplicating the send pipeline:
+     * a group invite is just a template whose body parameter has type
+     * `group_id` — BSUID routing, typing-indicator skip, logging and error
+     * handling are all already correct there.
+     */
+    public function sendGroupInviteTemplate(string $uid, string $token, string $to, string $templateName, string $languageCode, string $groupId): array
+    {
+        $components = [[
+            'type' => 'body',
+            'parameters' => [[
+                'type' => 'group_id',
+                'group_id' => $groupId,
+            ]],
+        ]];
+
+        return $this->sendTemplate($uid, $token, $to, $templateName, $languageCode, $components);
+    }
+
+    /**
+     * Body shape (`participants: [{user|user_id}]`) follows Meta's usual
+     * batch-object convention and is NOT independently confirmed against the
+     * Graph API reference — validate against a real Cloud API Groups number
+     * before depending on this in production.
+     */
+    public function removeGroupParticipant(string $uid, string $token, string $groupId, string $participant): array
+    {
+        $startTime = microtime(true);
+        $url = $this->groupsUrl($groupId . '/participants');
+        $payload = ['participants' => [$this->participantField($participant)]];
+        $res = Http::withToken($token)->delete($url, $payload);
+        if ($res->failed()) {
+            $this->logRequest('removeGroupParticipant', $uid, ['error' => $res->json('error', 'Failed to remove participant'), 'group_id' => $groupId], $startTime, $res, $url, $payload);
+            return ['error' => $res->json('error', 'Failed to remove participant')];
+        }
+        $this->logRequest('removeGroupParticipant', $uid, ['group_id' => $groupId], $startTime, $res, $url, $payload);
+        return $res->json();
+    }
+
+    public function getGroupJoinRequests(string $uid, string $token, string $groupId): array
+    {
+        $startTime = microtime(true);
+        $url = $this->groupsUrl($groupId . '/join_requests');
+        $res = Http::withToken($token)->get($url);
+        if ($res->failed()) {
+            $this->logRequest('getGroupJoinRequests', $uid, ['error' => $res->json('error', 'Failed to list join requests'), 'group_id' => $groupId], $startTime, $res, $url);
+            return ['error' => $res->json('error', 'Failed to list join requests')];
+        }
+        $this->logRequest('getGroupJoinRequests', $uid, ['group_id' => $groupId], $startTime, $res, $url);
+        return $res->json();
+    }
+
+    /** @see removeGroupParticipant() — same unconfirmed body-shape caveat applies. */
+    public function approveGroupJoinRequest(string $uid, string $token, string $groupId, string $participant): array
+    {
+        $startTime = microtime(true);
+        $url = $this->groupsUrl($groupId . '/join_requests');
+        $payload = ['participants' => [$this->participantField($participant)]];
+        $res = Http::withToken($token)->post($url, $payload);
+        if ($res->failed()) {
+            $this->logRequest('approveGroupJoinRequest', $uid, ['error' => $res->json('error', 'Failed to approve join request'), 'group_id' => $groupId], $startTime, $res, $url, $payload);
+            return ['error' => $res->json('error', 'Failed to approve join request')];
+        }
+        $this->logRequest('approveGroupJoinRequest', $uid, ['group_id' => $groupId], $startTime, $res, $url, $payload);
+        return $res->json();
+    }
+
+    /** @see removeGroupParticipant() — same unconfirmed body-shape caveat applies. */
+    public function rejectGroupJoinRequest(string $uid, string $token, string $groupId, string $participant): array
+    {
+        $startTime = microtime(true);
+        $url = $this->groupsUrl($groupId . '/join_requests');
+        $payload = ['participants' => [$this->participantField($participant)]];
+        $res = Http::withToken($token)->delete($url, $payload);
+        if ($res->failed()) {
+            $this->logRequest('rejectGroupJoinRequest', $uid, ['error' => $res->json('error', 'Failed to reject join request'), 'group_id' => $groupId], $startTime, $res, $url, $payload);
+            return ['error' => $res->json('error', 'Failed to reject join request')];
+        }
+        $this->logRequest('rejectGroupJoinRequest', $uid, ['group_id' => $groupId], $startTime, $res, $url, $payload);
+        return $res->json();
     }
 }

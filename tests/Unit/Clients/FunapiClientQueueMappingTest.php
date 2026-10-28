@@ -82,4 +82,65 @@ class FunapiClientQueueMappingTest extends TestCase
             $message['created']
         );
     }
+
+    /**
+     * Funapi 3.113.0 reports the operation state and what WhatsApp answered.
+     * A send WhatsApp refused with 479 stays `uncertain` and is never resent
+     * (Funnelchat20/fun-api#218); the consumer needs `serverCode` to tell it
+     * apart from an `uncertain` timeout, which may have been delivered.
+     */
+    public function test_show_queue_keeps_funapi_uncertain_state_and_last_failure(): void
+    {
+        Http::fake([
+            'https://api.whatsgo.wa-api.io/instances/UID/token/TOKEN/queue*' => Http::response([
+                [
+                    '_id' => '3EB0ED855412EAA739E4E9',
+                    'phone' => '120363426265687321@g.us',
+                    'status' => 'uncertain',
+                    'errors' => ['uncertain_not_resent'],
+                    'attempt' => 1,
+                    'zaapId' => '3EB0ED855412EAA739E4E9',
+                    'created' => 1792675849238,
+                    'lastFailure' => ['phase' => 'server_response', 'code' => 'server_error', 'serverCode' => 479],
+                ],
+            ], 200),
+        ]);
+
+        $message = $this->client->showQueue('UID', 'TOKEN')['messages'][0];
+
+        $this->assertSame('uncertain', $message['status']);
+        $this->assertSame(['uncertain_not_resent'], $message['errors']);
+        $this->assertSame(
+            ['phase' => 'server_response', 'code' => 'server_error', 'serverCode' => 479],
+            $message['lastFailure']
+        );
+    }
+
+    public function test_show_queue_defaults_the_state_fields_when_funapi_omits_them(): void
+    {
+        Http::fake([
+            'https://api.whatsgo.wa-api.io/instances/UID/token/TOKEN/queue*' => Http::response([
+                ['zaapId' => 'Z1', 'messageId' => 'M1', 'message' => 'hola'],
+            ], 200),
+        ]);
+
+        $message = $this->client->showQueue('UID', 'TOKEN')['messages'][0];
+
+        $this->assertNull($message['status']);
+        $this->assertSame([], $message['errors']);
+        $this->assertNull($message['lastFailure']);
+    }
+
+    public function test_show_queue_casts_a_string_server_code_to_int(): void
+    {
+        Http::fake([
+            'https://api.whatsgo.wa-api.io/instances/UID/token/TOKEN/queue*' => Http::response([
+                ['zaapId' => 'Z1', 'status' => 'uncertain', 'lastFailure' => ['phase' => 'timeout', 'serverCode' => '479']],
+            ], 200),
+        ]);
+
+        $message = $this->client->showQueue('UID', 'TOKEN')['messages'][0];
+
+        $this->assertSame(['phase' => 'timeout', 'code' => null, 'serverCode' => 479], $message['lastFailure']);
+    }
 }
