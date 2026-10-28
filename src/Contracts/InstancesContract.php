@@ -55,6 +55,31 @@ interface InstancesContract
      * Unsupported:  ['error' => 'unsupported', 'message' => 'SDK connector token is not supported for this provider']
      */
     public function sdkConnectorToken(string $uid, string $token): array;
+
+    /**
+     * Request a WhatsApp pairing code for a phone number, as a secondary
+     * option to scanning the QR ("Link with phone number instead" in
+     * WhatsApp's own Linked Devices flow). The code is NOT scanned: the
+     * WhatsApp account owner types it by hand on their phone (Settings →
+     * Linked devices → Link a device → Link with phone number instead).
+     * Once entered, the instance connects exactly like a QR scan would —
+     * callers keep polling `status()` as usual; this call only obtains the
+     * code, it has no separate confirmation step of its own.
+     *
+     * Implementations must never throw: failures are surfaced via the
+     * returned array. The array uses `error` as a discriminator when the
+     * call fails and omits it on success:
+     *
+     * Success:      ['code' => 'A1B2C3D4E5', 'challenge' => false]
+     * Challenge:    ['code' => null, 'challenge' => true] — the provider
+     *               requires a passkey challenge before the code is usable;
+     *               not implemented, treat as unavailable.
+     * Rate-limited: ['error' => 'rate_limited', 'message' => ..., 'status' => 429, 'errorCode' => ...|null]
+     * Upstream err: ['error' => 'upstream_error', 'message' => ..., 'status' => <http_status>, 'errorCode' => ...|null]
+     * Unsupported:  ['error' => 'unsupported', 'message' => 'Phone code is not supported for this provider']
+     */
+    public function phoneCode(string $uid, string $token, string $phone): array;
+
     public function logout(string $uid, string $token): array;
     public function reboot(string $uid, string $token): array;
     public function me(string $uid, string $token): array;

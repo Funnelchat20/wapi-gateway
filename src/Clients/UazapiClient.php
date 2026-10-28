@@ -240,6 +240,11 @@ class UazapiClient implements MessagesContract, InstancesContract, GroupsContrac
         return ['error' => 'unsupported', 'message' => 'SDK connector token is not supported for this provider'];
     }
 
+    public function phoneCode(string $uid, string $token, string $phone): array
+    {
+        return ['error' => 'unsupported', 'message' => 'Phone code is not supported for this provider'];
+    }
+
     public function reboot(string $uid, string $token): array
     {
         $startTime = microtime(true);
