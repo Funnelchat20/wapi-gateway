@@ -8,6 +8,7 @@ use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\TemplatesContract;
 use Funnelchat\WapiGateway\Contracts\ReadReceiptsContract;
 use Funnelchat\WapiGateway\Helpers\BucketFile;
+use Funnelchat\WapiGateway\Contracts\BlockedUsersListContract;
 use Funnelchat\WapiGateway\Contracts\BlockUsersContract;
 use Funnelchat\WapiGateway\Contracts\CloudApiGroupsContract;
 use Funnelchat\WapiGateway\Helpers\WhatsAppCloudHelper;
@@ -19,7 +20,7 @@ use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Funnelchat\WapiGateway\Traits\ResolvesMediaType;
 use Illuminate\Support\Facades\Http;
 
-class MetaClient implements MessagesContract, InstancesContract, ContactsContract, TemplatesContract, ReadReceiptsContract, CloudApiGroupsContract, BlockUsersContract
+class MetaClient implements MessagesContract, InstancesContract, ContactsContract, TemplatesContract, ReadReceiptsContract, CloudApiGroupsContract, BlockUsersContract, BlockedUsersListContract
 {
     use LogsDeviceRequests;
     use HandlesVoiceNoteOption;

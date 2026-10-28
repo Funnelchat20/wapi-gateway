@@ -3,6 +3,7 @@
 namespace Funnelchat\WapiGateway\Tests\Unit\Clients;
 
 use Funnelchat\WapiGateway\Clients\MetaClient;
+use Funnelchat\WapiGateway\Enums\ProviderEnum;
 use Funnelchat\WapiGateway\Gateway\GatewayManager;
 use Funnelchat\WapiGateway\Providers\WapiServiceProvider;
 use Illuminate\Support\Facades\Http;
@@ -179,8 +180,11 @@ class MetaClientBlockUsersTest extends TestCase
         $this->assertStringContainsString('131047', implode('', $logged));
     }
 
-    public function test_gateway_manager_exposes_the_meta_client_for_block_users(): void
+    public function test_gateway_manager_resolves_the_meta_client_for_block_users_and_the_list(): void
     {
-        $this->assertInstanceOf(MetaClient::class, $this->app->make(GatewayManager::class)->blockUsers());
+        $manager = $this->app->make(GatewayManager::class);
+
+        $this->assertInstanceOf(MetaClient::class, $manager->blockUsers(ProviderEnum::WhatsAppCloud));
+        $this->assertInstanceOf(MetaClient::class, $manager->blockedUsers());
     }
 }

@@ -45,7 +45,13 @@ class GatewayManager
         return $this->meta;
     }
 
-    public function blockUsers(): MetaClient
+    public function blockUsers(ProviderEnum $provider): object
+    {
+        return $this->resolveClient($provider);
+    }
+
+    /** Listing blocked users exists on Meta only (BlockedUsersListContract). */
+    public function blockedUsers(): MetaClient
     {
         return $this->meta;
     }
