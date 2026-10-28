@@ -45,6 +45,11 @@ class GatewayManager
         return $this->meta;
     }
 
+    public function blockUsers(): MetaClient
+    {
+        return $this->meta;
+    }
+
     public function queue(ProviderEnum $provider): object
     {
         return $this->resolveClient($provider);

@@ -8,6 +8,7 @@ use Funnelchat\WapiGateway\Contracts\ContactsContract;
 use Funnelchat\WapiGateway\Contracts\TemplatesContract;
 use Funnelchat\WapiGateway\Contracts\ReadReceiptsContract;
 use Funnelchat\WapiGateway\Helpers\BucketFile;
+use Funnelchat\WapiGateway\Contracts\BlockUsersContract;
 use Funnelchat\WapiGateway\Contracts\CloudApiGroupsContract;
 use Funnelchat\WapiGateway\Helpers\WhatsAppCloudHelper;
 use Funnelchat\WapiGateway\Jobs\StoreDeviceLogJob;
@@ -18,7 +19,7 @@ use Funnelchat\WapiGateway\Traits\LogsDeviceRequests;
 use Funnelchat\WapiGateway\Traits\ResolvesMediaType;
 use Illuminate\Support\Facades\Http;
 
-class MetaClient implements MessagesContract, InstancesContract, ContactsContract, TemplatesContract, ReadReceiptsContract, CloudApiGroupsContract
+class MetaClient implements MessagesContract, InstancesContract, ContactsContract, TemplatesContract, ReadReceiptsContract, CloudApiGroupsContract, BlockUsersContract
 {
     use LogsDeviceRequests;
     use HandlesVoiceNoteOption;
@@ -1149,5 +1150,93 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         }
         $this->logRequest('rejectGroupJoinRequest', $uid, ['group_id' => $groupId], $startTime, $res, $url, $payload);
         return $res->json();
+    }
+
+    /**
+     * Block Users shares the v26.0 Graph version already used for Groups and
+     * BSUID-aware sends.
+     */
+    public function blockUsers(string $uid, string $token, array $users): array
+    {
+        return $this->sendBlockUsersRequest('blockUsers', 'post', $uid, $token, $users, 'Failed to block users');
+    }
+
+    public function unblockUsers(string $uid, string $token, array $users): array
+    {
+        return $this->sendBlockUsersRequest('unblockUsers', 'delete', $uid, $token, $users, 'Failed to unblock users');
+    }
+
+    public function blockedUsers(string $uid, string $token, array $options = []): array
+    {
+        $startTime = microtime(true);
+        $url = $this->groupsUrl($uid . '/block_users');
+        $query = array_intersect_key($options, array_flip(['limit', 'after', 'before']));
+        $res = Http::withToken($token)->get($url, $query);
+
+        return $this->finishBlockUsersRequest('blockedUsers', $uid, $res, $startTime, $url, 'Failed to list blocked users');
+    }
+
+    /**
+     * Shared POST/DELETE path. The 1-1000 bound is checked before any call so
+     * an empty or oversized batch never reaches Meta.
+     *
+     * @param string[] $users
+     */
+    private function sendBlockUsersRequest(string $method, string $verb, string $uid, string $token, array $users, string $fallbackError): array
+    {
+        $users = array_values(array_filter(array_map(fn($u) => trim((string) $u), $users), fn($u) => $u !== ''));
+        if ($users === [] || count($users) > BlockUsersContract::MAX_USERS_PER_CALL) {
+            return ['error' => 'invalid_users_count'];
+        }
+
+        $startTime = microtime(true);
+        $url = $this->groupsUrl($uid . '/block_users');
+        $payload = [
+            'messaging_product' => 'whatsapp',
+            'block_users' => array_map(fn($u) => ['user' => $u], $users),
+        ];
+        $res = Http::withToken($token)->{$verb}($url, $payload);
+
+        return $this->finishBlockUsersRequest($method, $uid, $res, $startTime, $url, $fallbackError, count($users));
+    }
+
+    /**
+     * Returns Meta's full JSON. On failure it adds an `error` key on top of the
+     * body, so `block_users.failed_users` still reaches the caller.
+     *
+     * The log gets the count and the error codes only: the request payload and
+     * the response body both carry the contacts' phone numbers, so neither is
+     * handed to logRequest() (it would store them in the device log).
+     */
+    private function finishBlockUsersRequest(string $method, string $uid, $res, float $startTime, string $url, string $fallbackError, ?int $count = null): array
+    {
+        $json = $res->json();
+        $json = is_array($json) ? $json : [];
+        $context = ['status' => $res->status()];
+        if ($count !== null) {
+            $context['count'] = $count;
+        }
+
+        $failedCodes = [];
+        foreach ($json['block_users']['failed_users'] ?? [] as $failed) {
+            foreach ($failed['errors'] ?? [] as $err) {
+                if (isset($err['code'])) {
+                    $failedCodes[] = $err['code'];
+                }
+            }
+        }
+        if ($failedCodes !== []) {
+            $context['failed_error_codes'] = array_values(array_unique($failedCodes));
+        }
+
+        if ($res->failed()) {
+            $this->logRequest($method, $uid, $context + ['error' => $json['error']['message'] ?? $fallbackError, 'error_code' => $json['error']['code'] ?? null], $startTime, null, $url);
+
+            return ['error' => $json['error'] ?? $fallbackError] + $json;
+        }
+
+        $this->logRequest($method, $uid, $context, $startTime, null, $url);
+
+        return $json;
     }
 }
