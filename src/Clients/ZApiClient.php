@@ -2,6 +2,7 @@
 
 namespace Funnelchat\WapiGateway\Clients;
 
+use Funnelchat\WapiGateway\Contracts\BlockUsersContract;
 use Funnelchat\WapiGateway\Contracts\MessagesContract;
 use Funnelchat\WapiGateway\Contracts\InstancesContract;
 use Funnelchat\WapiGateway\Contracts\GroupsContract;
@@ -33,7 +34,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response as ClientResponse;
 
-class ZApiClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract, ReadReceiptsContract
+class ZApiClient implements MessagesContract, InstancesContract, GroupsContract, ContactsContract, QueueContract, ReadReceiptsContract, BlockUsersContract
 {
     use LogsDeviceRequests;
     use ConfiguresClientProxy;
@@ -1727,5 +1728,82 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         ]);
 
         return $results;
+    }
+
+    /**
+     * Endpoint that blocks/unblocks a contact. Z-API documents it under
+     * `contacts/`; Funapi's server mounts it at the instance root (overrides this).
+     */
+    protected function modifyBlockedAction(): string
+    {
+        return 'contacts/modify-blocked';
+    }
+
+    public function blockUsers(string $uid, string $token, array $users): array
+    {
+        return $this->modifyBlocked('blockUsers', 'block', $uid, $token, $users);
+    }
+
+    public function unblockUsers(string $uid, string $token, array $users): array
+    {
+        return $this->modifyBlocked('unblockUsers', 'unblock', $uid, $token, $users);
+    }
+
+    /**
+     * One request per phone (the endpoint takes a single `phone`), folded into
+     * Meta's `block_users.{added,removed}_users` / `failed_users` shape so the
+     * caller handles one format for every provider. The 1-50 bound is checked
+     * before any call.
+     *
+     * Logs get the count and the HTTP status only: neither the payload nor the
+     * response is handed to logRequest(), since both carry the phone number.
+     *
+     * @param string[] $users
+     */
+    private function modifyBlocked(string $method, string $action, string $uid, string $token, array $users): array
+    {
+        $users = array_values(array_filter(array_map(fn($u) => trim((string) $u), $users), fn($u) => $u !== ''));
+        if ($users === [] || count($users) > BlockUsersContract::MAX_USERS_PER_CALL_SEQUENTIAL) {
+            return ['error' => 'invalid_users_count'];
+        }
+
+        $url = str_replace(['UID', 'TOKEN', 'ACTION'], [$uid, $token, $this->modifyBlockedAction()], $this->baseUrl());
+        $done = [];
+        $failed = [];
+
+        foreach ($users as $user) {
+            // Only formatting separators are stripped. A BSUID or any other
+            // non-numeric value is rejected instead of being reduced to its
+            // digits, which would block a different number.
+            $phone = preg_replace('/[\s\-().+]/', '', $user);
+            if (! preg_match('/^\d{6,20}$/', $phone)) {
+                $failed[] = ['input' => $user, 'errors' => [['code' => 'invalid_phone', 'message' => 'Invalid phone number']]];
+                continue;
+            }
+
+            $startTime = microtime(true);
+            $res = Http::withHeaders(['Client-Token' => config("$this->configPrefix.client_token")])
+                ->timeout(config("$this->configPrefix.timeout", 120))
+                ->post($url, ['phone' => $phone, 'action' => $action]);
+
+            if ($res->failed() || $res->json('error')) {
+                $message = $this->formatError($res->json('error', $res->json('message', 'Failed to ' . $action . ' user')));
+                $failed[] = ['input' => $user, 'errors' => [['code' => $res->status(), 'message' => $message]]];
+                $this->logRequest($method, $uid, ['status' => $res->status(), 'error' => $message], $startTime, null, $url);
+                continue;
+            }
+
+            $done[] = ['input' => $user, 'wa_id' => $phone];
+            $this->logRequest($method, $uid, ['status' => $res->status()], $startTime, null, $url);
+        }
+
+        $blockUsers = [$action === 'block' ? 'added_users' : 'removed_users' => $done];
+        if ($failed !== []) {
+            $blockUsers['failed_users'] = $failed;
+
+            return ['block_users' => $blockUsers, 'error' => $failed[0]['errors'][0]['message']];
+        }
+
+        return ['block_users' => $blockUsers];
     }
 }
