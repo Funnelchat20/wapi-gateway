@@ -1774,9 +1774,11 @@ class ZApiClient implements MessagesContract, InstancesContract, GroupsContract,
         foreach ($users as $user) {
             // Only formatting separators are stripped. A BSUID or any other
             // non-numeric value is rejected instead of being reduced to its
-            // digits, which would block a different number.
-            $phone = preg_replace('/[\s\-().+]/', '', $user);
-            if (! preg_match('/^\d{6,20}$/', $phone)) {
+            // digits, which would block a different number. The one exception
+            // is a whatsmeow `@lid` (`<digits>@lid`), sent as is: it is how the
+            // send path addresses a contact with no phone on these providers.
+            $phone = preg_match('/^\d{6,30}@lid$/', $user) ? $user : preg_replace('/[\s\-().+]/', '', $user);
+            if (! preg_match('/^\d{6,20}$/', $phone) && ! preg_match('/^\d{6,30}@lid$/', $phone)) {
                 $failed[] = ['input' => $user, 'errors' => [['code' => 'invalid_phone', 'message' => 'Invalid phone number']]];
                 continue;
             }

@@ -105,6 +105,34 @@ class ZApiFamilyBlockUsersTest extends TestCase
     }
 
     #[\PHPUnit\Framework\Attributes\DataProvider('providers')]
+    public function test_a_lid_is_sent_as_is_and_unblock_uses_it_too(string $client): void
+    {
+        Http::fake(['*' => Http::response(['value' => true], 200)]);
+
+        $block = (new $client())->blockUsers('UID', 'TOKEN', ['987654321012@lid']);
+        $unblock = (new $client())->unblockUsers('UID', 'TOKEN', ['987654321012@lid']);
+
+        Http::assertSent(fn($request) => $request->data() === ['phone' => '987654321012@lid', 'action' => 'block']);
+        Http::assertSent(fn($request) => $request->data() === ['phone' => '987654321012@lid', 'action' => 'unblock']);
+        $this->assertSame('987654321012@lid', $block['block_users']['added_users'][0]['wa_id']);
+        $this->assertSame('987654321012@lid', $unblock['block_users']['removed_users'][0]['wa_id']);
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('providers')]
+    public function test_a_malformed_lid_still_fails_locally(string $client): void
+    {
+        Http::fake();
+
+        foreach (['abc@lid', '12@lid', '123456@s.whatsapp.net'] as $bad) {
+            $result = (new $client())->blockUsers('UID', 'TOKEN', [$bad]);
+
+            $this->assertSame('invalid_phone', $result['block_users']['failed_users'][0]['errors'][0]['code'], $bad);
+        }
+
+        Http::assertNothingSent();
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('providers')]
     public function test_a_value_that_is_not_a_phone_fails_locally_without_a_call(string $client): void
     {
         Http::fake();

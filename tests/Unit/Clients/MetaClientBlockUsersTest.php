@@ -47,6 +47,19 @@ class MetaClientBlockUsersTest extends TestCase
         $this->assertArrayNotHasKey('error', $result);
     }
 
+    public function test_a_bsuid_goes_as_user_id_and_a_phone_as_user(): void
+    {
+        $this->fakeGraph(['block_users' => ['added_users' => []]]);
+
+        (new MetaClient())->blockUsers(self::UID, 'TOKEN', ['CO.1021346770783737', self::PHONE]);
+        (new MetaClient())->unblockUsers(self::UID, 'TOKEN', ['CO.1021346770783737']);
+
+        Http::assertSent(fn($request) => $request->method() === 'POST'
+            && $request->data()['block_users'] === [['user_id' => 'CO.1021346770783737'], ['user' => self::PHONE]]);
+        Http::assertSent(fn($request) => $request->method() === 'DELETE'
+            && $request->data()['block_users'] === [['user_id' => 'CO.1021346770783737']]);
+    }
+
     public function test_block_accepts_several_users_in_one_call(): void
     {
         $this->fakeGraph(['block_users' => ['added_users' => []]]);
