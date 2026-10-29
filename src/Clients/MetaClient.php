@@ -1178,7 +1178,10 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     }
 
     /**
-     * Shared POST/DELETE path. The 1-1000 bound is checked before any call so
+     * Shared POST/DELETE path. A BSUID goes as `user_id`, a phone as `user` (the same split the
+     * send path makes with `recipient`/`to`). Meta's Block Users reference documents only `user`,
+     * so `user_id` is unconfirmed: Meta answers with an error that reaches the caller.
+     * The 1-1000 bound is checked before any call so
      * an empty or oversized batch never reaches Meta.
      *
      * @param string[] $users
@@ -1194,7 +1197,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         $url = $this->groupsUrl($uid . '/block_users');
         $payload = [
             'messaging_product' => 'whatsapp',
-            'block_users' => array_map(fn($u) => ['user' => $u], $users),
+            'block_users' => array_map(fn($u) => $this->participantField($u), $users),
         ];
         $res = Http::withToken($token)->{$verb}($url, $payload);
 
