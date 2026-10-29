@@ -50,4 +50,46 @@ class MeResourceTest extends TestCase
             'about' => 'Hello there',
         ], $result);
     }
+
+    public function test_maps_lid_when_present(): void
+    {
+        $result = MeResource::make([
+            'phone' => '5511999999999',
+            'name' => 'Jane',
+            'lid' => '176188567867647@lid',
+        ]);
+
+        $this->assertSame('176188567867647@lid', $result['lid']);
+    }
+
+    public function test_omits_lid_when_absent_or_empty(): void
+    {
+        foreach ([[], ['lid' => ''], ['lid' => null]] as $extra) {
+            $result = MeResource::make(['phone' => '5511999999999', 'name' => 'Jane'] + $extra);
+
+            $this->assertArrayNotHasKey('lid', $result);
+        }
+    }
+
+    public function test_preserves_existing_fields_alongside_lid(): void
+    {
+        $result = MeResource::make([
+            'phone' => '5511999999999',
+            'name' => 'Jane',
+            'imgUrl' => 'https://example.com/avatar.jpg',
+            'isBusiness' => false,
+            'about' => 'Hello there',
+            'lid' => '176188567867647@lid',
+        ]);
+
+        $this->assertSame([
+            'phone' => '5511999999999',
+            'locale' => '',
+            'name' => 'Jane',
+            'avatar' => 'https://example.com/avatar.jpg',
+            'isBusiness' => false,
+            'about' => 'Hello there',
+            'lid' => '176188567867647@lid',
+        ], $result);
+    }
 }
