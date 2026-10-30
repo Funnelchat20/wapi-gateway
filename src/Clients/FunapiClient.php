@@ -857,38 +857,9 @@ class FunapiClient extends ZApiClient
         return $res->json();
     }
 
-    public function updateNewsletterName(string $uid, string $token, string $id, string $name): array
-    {
-        $startTime = microtime(true);
-        $url = $this->buildUrl($uid, $token, 'update-newsletter-name');
-        $payload = ['id' => $id, 'name' => $name];
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->put($url, $payload);
-        $this->logRequest('updateNewsletterName', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return $res->json();
-    }
-
-    public function updateNewsletterDescription(string $uid, string $token, string $id, string $description): array
-    {
-        $startTime = microtime(true);
-        $url = $this->buildUrl($uid, $token, 'update-newsletter-description');
-        $payload = ['id' => $id, 'description' => $description];
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->put($url, $payload);
-        $this->logRequest('updateNewsletterDescription', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return $res->json();
-    }
-
-    public function updateNewsletterPicture(string $uid, string $token, string $id, string $photoUrl): array
-    {
-        $startTime = microtime(true);
-        $url = $this->buildUrl($uid, $token, 'update-newsletter-picture');
-        $payload = ['id' => $id, 'picture' => $photoUrl];
-        $res = Http::withHeaders(['Client-Token' => config('funapi.client_token')])->timeout(config('funapi.timeout', 120))->put($url, $payload);
-        $this->logRequest('updateNewsletterPicture', $uid, $res->failed() || $res->json('error') ? ['error' => $res->json('error', 'error')] : [], $startTime, $res, $url, $payload);
-        if ($res->failed() || $res->json('error')) return ['error' => $this->formatError($res->json('error', 'error'))];
-        return $res->json();
-    }
+    // updateNewsletterName/Description/Picture are inherited from ZApiClient: whatsgo's
+    // contract for them is the one Z-API's was fixed to (POST, `@newsletter` id,
+    // `pictureUrl`). A copy here kept the old PUT shape and answered 405.
 
     public function newsletters(string $uid, string $token): array
     {
