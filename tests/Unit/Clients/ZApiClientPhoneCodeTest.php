@@ -91,8 +91,13 @@ class ZApiClientPhoneCodeTest extends TestCase
         $this->assertSame('upstream_error', $result['error']);
     }
 
-    public function test_funapi_inherits_the_same_phone_code_behaviour(): void
+    public function test_funapi_shares_the_route_but_answers_the_code_under_a_different_field(): void
     {
+        // Same route/method as Z-API (api/internal/http/handlers/instances.go:127), but the
+        // success body carries the code under `code`, not `value` — confirmed against FunAPI's
+        // own handler (instances.go:303). FunApi never sends `challenge` either. Getting this
+        // field wrong meant a silently empty code for FunApi, the forced provider for every new
+        // device — i.e. the common case, not an edge case.
         config([
             'funapi.base_url' => 'https://funapi.example.com',
             'funapi.client_token' => 'funapi-token',
@@ -100,13 +105,13 @@ class ZApiClientPhoneCodeTest extends TestCase
 
         Http::fake([
             'https://funapi.example.com/instances/UID/token/TOKEN/phone-code/5511999999999' => Http::response([
-                'value' => 'F1U2N3A4P5',
+                'code' => 'ABCD-EFGH',
             ], 200),
         ]);
 
         $result = (new FunapiClient())->phoneCode('UID', 'TOKEN', '5511999999999');
 
-        $this->assertSame(['code' => 'F1U2N3A4P5', 'challenge' => false], $result);
+        $this->assertSame(['code' => 'ABCD-EFGH', 'challenge' => false], $result);
     }
 
     public function test_uazapi_reports_phone_code_as_unsupported(): void

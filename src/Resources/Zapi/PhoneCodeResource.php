@@ -10,6 +10,11 @@ class PhoneCodeResource
      * completed through a separate endpoint before the code is usable. That
      * challenge flow is not implemented here, so it surfaces as `code: null,
      * challenge: true` instead of a code the caller could show.
+     *
+     * FunApi (same route/method, `api/internal/http/handlers/instances.go`)
+     * shares none of this: it never sends `challenge`, and its success body
+     * carries the code under `code`, not `value`. `value` is tried first
+     * since it is the documented Z-API field.
      */
     public static function make(array $data): array
     {
@@ -17,6 +22,6 @@ class PhoneCodeResource
             return ['code' => null, 'challenge' => true];
         }
 
-        return ['code' => $data['value'] ?? null, 'challenge' => false];
+        return ['code' => $data['value'] ?? $data['code'] ?? null, 'challenge' => false];
     }
 }
