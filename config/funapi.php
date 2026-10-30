@@ -12,6 +12,9 @@ return [
     'webhook_base_url' => env('WEBHOOK_BASE_URL', env('APP_URL')),
     // Optional: separate base URL for messageStatusCallbackUrl. Falls back to webhook_base_url when unset.
     'webhook_status_base_url' => env('WEBHOOK_STATUS_BASE_URL', env('WEBHOOK_BASE_URL', env('APP_URL'))),
+    // Path of the callback routes on that host. wapi serves FunAPI on /webhooks/zapi/* (default);
+    // wapi-go also has /webhooks/funapi/*.
+    'webhook_path_prefix' => env('FUNAPI_WEBHOOK_PATH_PREFIX', '/webhooks/zapi'),
 
     /*
     |--------------------------------------------------------------------------
