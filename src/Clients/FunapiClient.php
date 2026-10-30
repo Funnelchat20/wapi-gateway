@@ -44,6 +44,15 @@ class FunapiClient extends ZApiClient
         return 'funapi';
     }
 
+    /**
+     * FunApi mounts `POST /modify-blocked` at the instance root
+     * (api/internal/http/handlers/messages.go), without Z-API's `contacts/` prefix.
+     */
+    protected function modifyBlockedAction(): string
+    {
+        return 'modify-blocked';
+    }
+
     // Status constants for compatibility with WAPI
     protected const YOU_ARE_NOT_CONNECTED = 'You are not connected.';
     protected const YOU_NEED_TO_RESTORE_SESSION = 'You need to restore the session.';
