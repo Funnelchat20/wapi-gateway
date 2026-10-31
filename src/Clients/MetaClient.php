@@ -35,6 +35,12 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
     private const TYPING_INDICATOR_TIMEOUT = 5;
 
     /**
+     * Lambda enforces a 30s hard limit; without this, a slow Graph API call
+     * runs past it and the caller sees a bare 502 instead of a readable error.
+     */
+    private const REQUEST_TIMEOUT = 15;
+
+    /**
      * Meta's "Business-scoped User ID (BSUID) recipients are not supported for
      * this message". A BSUID destination accepts a narrower set of messages
      * than a phone (Meta excludes one-tap, zero-tap and copy-code
@@ -154,7 +160,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'text' => ['body' => $text],
         ];
         $payload = $this->applyQuoteOption($payload, $options);
-        $res = Http::withToken($token)->post($url, $payload);
+        $res = Http::withToken($token)->timeout(self::REQUEST_TIMEOUT)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendText', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
             return $this->withTypingResult($this->sendError($res, $to), $typingResult);
@@ -240,7 +246,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         if ($voiceNote) $payload['audio']['voice'] = true;
         $payload = $this->applyQuoteOption($payload, $options);
         $url = $this->messagesUrl($uid, $to);
-        $res = Http::withToken($token)->post($url, $payload);
+        $res = Http::withToken($token)->timeout(self::REQUEST_TIMEOUT)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendFile', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to, 'file_type' => $ext], $startTime, $res, $url, $payload);
             return $this->withTypingResult($this->sendError($res, $to), $typingResult);
@@ -257,7 +263,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         if (isset($options['address'])) $payload['location']['address'] = $options['address'];
         $payload = $this->applyQuoteOption($payload, $options);
         $url = $this->messagesUrl($uid, $to);
-        $res = Http::withToken($token)->post($url, $payload);
+        $res = Http::withToken($token)->timeout(self::REQUEST_TIMEOUT)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendLocation', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
             return $this->sendError($res, $to);
@@ -307,7 +313,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         }
         $payload = $this->applyQuoteOption($payload, $options);
         $url = $this->messagesUrl($uid, $to);
-        $res = Http::withToken($token)->post($url, $payload);
+        $res = Http::withToken($token)->timeout(self::REQUEST_TIMEOUT)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendButtons', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
             return $this->withTypingResult($this->sendError($res, $to), $typingResult);
@@ -332,7 +338,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         ];
         $payload = $this->applyQuoteOption($payload, $options);
         $requestUrl = $this->messagesUrl($uid, $to);
-        $res = Http::withToken($token)->post($requestUrl, $payload);
+        $res = Http::withToken($token)->timeout(self::REQUEST_TIMEOUT)->post($requestUrl, $payload);
         if ($res->failed()) {
             $this->logRequest('sendButtonLink', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $requestUrl, $payload);
             return $this->withTypingResult($this->sendError($res, $to), $typingResult);
@@ -385,7 +391,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         ];
         $payload = $this->applyQuoteOption($payload, $extra);
         $url = $this->messagesUrl($uid, $to);
-        $res = Http::withToken($token)->post($url, $payload);
+        $res = Http::withToken($token)->timeout(self::REQUEST_TIMEOUT)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendOptionList', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
             return $this->withTypingResult($this->sendError($res, $to), $typingResult);
@@ -426,7 +432,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
         ];
         $payload = $this->applyQuoteOption($payload, $options);
         $url = $this->messagesUrl($uid, $to);
-        $res = Http::withToken($token)->post($url, $payload);
+        $res = Http::withToken($token)->timeout(self::REQUEST_TIMEOUT)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendLink', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
             return $this->withTypingResult($this->sendError($res, $to), $typingResult);
@@ -462,7 +468,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             ]
         ];
         $url = $this->messagesUrl($uid, $to);
-        $res = Http::withToken($token)->post($url, $payload);
+        $res = Http::withToken($token)->timeout(self::REQUEST_TIMEOUT)->post($url, $payload);
         if ($res->failed()) {
             $this->logRequest('sendTemplate', $uid, ['error' => $res->json('error', 'Failed to send'), 'phone' => $to], $startTime, $res, $url, $payload);
             return $this->sendError($res, $to);
@@ -540,7 +546,7 @@ class MetaClient implements MessagesContract, InstancesContract, ContactsContrac
             'reaction' => ['message_id' => $messageId, 'emoji' => $emoji],
         ];
         $url = $this->messagesUrl($uid, $to);
-        $res = Http::withToken($token)->post($url, $payload);
+        $res = Http::withToken($token)->timeout(self::REQUEST_TIMEOUT)->post($url, $payload);
         $context = ['phone' => $to, 'removing' => $emoji === ''];
         if ($res->failed()) {
             $context['error'] = $res->json('error', 'Failed to send');
