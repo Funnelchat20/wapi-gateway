@@ -92,29 +92,22 @@ class FunapiClient extends ZApiClient
     }
 
     /**
-     * whatsgo cannot edit a sent message, so this refuses instead of sending.
+     * Edit a sent text: `send-text` carrying `editMessageId`, the same contract
+     * as {@see ZApiClient::editMessage()}.
      *
-     * Inheriting {@see ZApiClient::editMessage()} is worse than having no edit
-     * at all: that implementation is `sendText()` carrying `editMessageId`,
-     * and this client's `sendText()` has no such key — the edit left as a
-     * plain send, posting a SECOND message to the chat and returning the
-     * normal success resource, so the caller recorded the original as edited.
+     * whatsgo added `editMessageId` to `send-text` in 3.113.0
+     * (Funnelchat20/fun-api#211; documented in its OpenAPI since then). The
+     * original must be a confirmed message sent by this instance to this
+     * chat; WhatsApp's own edit window still applies and its refusal comes
+     * back as `['error' => ...]`.
      *
-     * whatsgo's OpenAPI (v3.112.5) documents no `editMessageId` anywhere; its
-     * only "edit" endpoint is `send-edit-event`, which edits an event, not a
-     * message. `isEdit` exists solely on the inbound webhook — whatsgo reports
-     * that a message it received was edited, it does not edit.
-     *
-     * The method stays declared so the refusal is explicit, which also means
-     * `method_exists()` keeps answering true by inheritance: a caller that
-     * probes for the method to build its provider list (communities'
-     * `WapiSentMessageEditor`) will still list funapi, and gets this error
-     * rather than a duplicate. Revisit if Funnelchat20/fun-api#211 is answered
-     * with a real edit endpoint.
+     * Declared here (not inherited) so the dependency on {@see self::sendText()}
+     * forwarding `editMessageId` is explicit: without that key the call would
+     * be a plain send — a second message in the chat reported as success.
      */
     public function editMessage(string $uid, string $token, string $phone, string $messageId, string $text): array
     {
-        return ['error' => 'Editing a sent message is not supported by funapi.'];
+        return $this->sendText($uid, $token, $phone, $text, ['editMessageId' => $messageId]);
     }
 
     /**
@@ -142,6 +135,7 @@ class FunapiClient extends ZApiClient
         if (isset($options['delayMessage'])) $payload['delayMessage'] = (int) $options['delayMessage'];
         if (isset($options['delayTyping'])) $payload['delayTyping'] = (int) $options['delayTyping'];
         if (isset($options['messageId']) && trim((string) $options['messageId']) !== '') $payload['messageId'] = (string) $options['messageId'];
+        if (isset($options['editMessageId']) && trim((string) $options['editMessageId']) !== '') $payload['editMessageId'] = (string) $options['editMessageId'];
         $payload = $this->applyTypingOption($payload, $options);
 
         $request = Http::withHeaders(['Client-Token' => config('funapi.client_token')])
