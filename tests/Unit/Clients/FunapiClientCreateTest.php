@@ -48,6 +48,36 @@ class FunapiClientCreateTest extends TestCase
         });
     }
 
+    public function test_create_registers_callbacks_on_zapi_routes_by_default(): void
+    {
+        $this->fakeFunapi();
+        config(['funapi.webhook_base_url' => 'https://wapi.example.com', 'funapi.webhook_status_base_url' => 'https://status.example.com']);
+
+        (new FunapiClient())->create(7, 42);
+
+        Http::assertSent(fn ($request) => $request->url() === 'https://funapi.example.com/instances/on-demand'
+            && $request->data()['receivedAndDeliveryCallbackUrl'] === 'https://wapi.example.com/webhooks/zapi/received-and-delivery?userId=7&deviceId=42'
+            && $request->data()['messageStatusCallbackUrl'] === 'https://status.example.com/webhooks/zapi/message-status?userId=7&deviceId=42'
+            && $request->data()['blockCallbackUrl'] === 'https://wapi.example.com/webhooks/zapi/block?userId=7&deviceId=42');
+    }
+
+    public function test_create_uses_the_configured_webhook_path_prefix(): void
+    {
+        $this->fakeFunapi();
+        config([
+            'funapi.webhook_base_url' => 'https://hooks.example.com',
+            'funapi.webhook_status_base_url' => 'https://hooks.example.com',
+            'funapi.webhook_path_prefix' => '/webhooks/funapi',
+        ]);
+
+        (new FunapiClient())->create(7, 42);
+
+        Http::assertSent(fn ($request) => $request->url() === 'https://funapi.example.com/instances/on-demand'
+            && $request->data()['receivedAndDeliveryCallbackUrl'] === 'https://hooks.example.com/webhooks/funapi/received-and-delivery?userId=7&deviceId=42'
+            && $request->data()['connectedCallbackUrl'] === 'https://hooks.example.com/webhooks/funapi/connected?userId=7&deviceId=42'
+            && $request->data()['messageStatusCallbackUrl'] === 'https://hooks.example.com/webhooks/funapi/message-status?userId=7&deviceId=42');
+    }
+
     public function test_create_omits_country_code_when_null(): void
     {
         $this->fakeFunapi();
