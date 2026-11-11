@@ -623,6 +623,17 @@ Configurados en el payload de creación de instancia:
 - `/webhooks/funapi/message-status` - Estados de mensajes enviados
 - `/webhooks/funapi/block` - Bloqueos/desbloqueos
 
+Historial de chats al vincular (opcional, solo Funapi): `create()` acepta un cuarto argumento,
+`historySyncCallbackUrl`, que va tal cual en el body de creación. Funapi manda ahí el historial
+que el teléfono envía al escanear el QR y lo descarta si la URL no está puesta cuando llega, así
+que solo sirve al crear la instancia. Sin ese argumento (o vacío) el body no cambia. No depende de
+`WEBHOOK_BASE_URL`: la app host arma la URL completa.
+
+```php
+WapiGateway::instances(ProviderEnum::FunApi)
+    ->create($userId, $deviceId, 'CO', historySyncCallbackUrl: 'https://mi-app.com/webhooks/funapi/history?deviceId=42');
+```
+
 ### 💡 Ejemplo de Uso
 
 ```php
@@ -816,6 +827,7 @@ class WhatsAppController extends Controller
 - ⚠️ El body de `removeGroupParticipant()`/`approveGroupJoinRequest()`/`rejectGroupJoinRequest()` sigue la convención habitual de Meta (`participants: [{user|user_id}]`) pero no está confirmado contra la referencia completa del Graph API — validar contra un número real antes de depender de esto en producción.
 - ✨ `sendFile()` acepta `$options['type']` (`image`, `video`, `audio`, `document`, `sticker`) para URLs sin extensión — ver [Archivos por URL](#archivos-por-url-sendfile-con-type)
 - ✨ Meta reconoce todas las extensiones que acepta la Cloud API: 3gp, amr, txt, xls, xlsx, ppt, pptx y webp (sticker)
+- ✨ Funapi: `create()` acepta `historySyncCallbackUrl` (cuarto argumento, opcional) y lo manda en el body de creación para recibir el historial de chats al vincular el QR. Sin él, el body no cambia; Z-API, Z-API Lite y el contrato `InstancesContract` no cambian
 
 **Fixed:**
 - 🐛 `sendFile()` lee la extensión del path de la URL, no de la URL entera: las URLs firmadas (`foto.jpg?X-Amz-Signature=...`) ya no fallan con `Invalid file extension`. Si el path no tiene, usa la de `fileName`
