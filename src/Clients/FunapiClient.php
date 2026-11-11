@@ -171,7 +171,15 @@ class FunapiClient extends ZApiClient
         return MessageResource::make($res->json());
     }
 
-    public function create(int $userId, int $deviceId, ?string $countryCode = null): array
+    /**
+     * $historySyncCallbackUrl (FunApi only, optional): where FunApi posts the
+     * chat history the phone pushes right after pairing. FunApi drops that
+     * history for good when no URL is set by the time it arrives, so it can
+     * only be given here, before the QR is scanned. Sent as-is (the caller
+     * builds the full URL, query string included); omitted when null/empty,
+     * which keeps the create body exactly as before.
+     */
+    public function create(int $userId, int $deviceId, ?string $countryCode = null, ?string $historySyncCallbackUrl = null): array
     {
         $startTime = microtime(true);
         $name = 'U-' . $userId . ' D-' . $deviceId;
@@ -203,6 +211,12 @@ class FunapiClient extends ZApiClient
             $payload['connectedCallbackUrl'] = $webhookBaseUrl . '/webhooks/zapi/connected?userId=' . $userId . '&deviceId=' . $deviceId;
             $payload['messageStatusCallbackUrl'] = $webhookStatusBaseUrl . '/webhooks/zapi/message-status?userId=' . $userId . '&deviceId=' . $deviceId;
             $payload['blockCallbackUrl'] = $webhookBaseUrl . '/webhooks/zapi/block?userId=' . $userId . '&deviceId=' . $deviceId;
+        }
+
+        // Independent of WEBHOOK_BASE_URL: the caller decides where the history
+        // goes (and whether to ask for it at all).
+        if ($historySyncCallbackUrl !== null && $historySyncCallbackUrl !== '') {
+            $payload['historySyncCallbackUrl'] = $historySyncCallbackUrl;
         }
 
         $url = config('funapi.on_demand_url');
